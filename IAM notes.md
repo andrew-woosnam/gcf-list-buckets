@@ -1,175 +1,220 @@
-### Notes: Setting Up Federated Identities for AWS IAM to GCP Integration (GCS Access)
+# Compute Account IAM Setup
+
+## Overview
+In the compute account, IAM roles and policies are created using Terraform to manage permissions for serverless functions and service accounts. This ensures secure access to resources like message queues, KMS, and other necessary AWS / GCP components.
+
+## AWS Implementation
+
+Here's the following IAM as configured by Terraform when the compute account is set up in AWS:
+
+### IAM Roles / Policies
+
+- **Mothership Service Account Role**: `cds_mothership_service_account_iam_role`
+    - Attached Policies:
+        - **SQS Access Policy (`cds_sqs_consumption_iam_policy`)** grants permission to:
+            - Receive SQS messages:
+                - `sqs:ReceiveMessage`
+            - Delete SQS messages:
+                - `sqs:DeleteMessage`
+            - Get queue attributes:
+                - `sqs:GetQueueAttributes`
+        - **KMS Encryption Policy (`cds_kms_encryption_iam_policy`)** grants permission to:
+            - Encrypt data using KMS:
+                - `kms:Encrypt`
+
+- **Scanner Lambda Role**: `cds_scanner_lambda_execution_role`
+    - Attached Policy:
+        - **Scanner Lambda Policy (`cds_scanner_lambda_iam_policy`)** grants permission to:
+            - Read S3 objects:
+                - `s3:GetObject`
+            - Send/receive messages in SQS:
+                - `sqs:SendMessage`
+                - `sqs:ReceiveMessage`
+                - `sqs:DeleteMessage`
+                - `sqs:GetQueueAttributes`
+            - Decrypt data using KMS:
+                - `kms:Decrypt`
+            - Write logs to CloudWatch:
+                - `logs:CreateLogGroup`
+                - `logs:CreateLogStream`
+                - `logs:PutLogEvents`
+
+- **Crawler Lambda Role**: `cds_crawler_lambda_execution_role`
+    - Attached Policy:
+        - **Crawler Lambda Policy (`cds_crawler_lambda_iam_policy`)** grants permission to:
+            - List S3 buckets:
+                - `s3:ListBucket`
+            - Send/receive messages in SQS:
+                - `sqs:SendMessage`
+                - `sqs:ReceiveMessage`
+                - `sqs:DeleteMessage`
+                - `sqs:GetQueueAttributes`
+            - Decrypt data using KMS:
+                - `kms:Decrypt`
+            - Write logs to CloudWatch:
+                - `logs:CreateLogGroup`
+                - `logs:CreateLogStream`
+                - `logs:PutLogEvents`
+
+- **Control Lambda Role**: `cds_control_lambda_execution_role`
+    - Attached Policy:
+        - **Control Lambda Policy (`cds_control_lambda_iam_policy`)** grants permission to:
+            - Manage SQS messages:
+                - `sqs:SendMessage`
+                - `sqs:ReceiveMessage`
+                - `sqs:DeleteMessage`
+                - `sqs:GetQueueAttributes`
+            - Access secrets in Secrets Manager:
+                - `secretsmanager:GetSecretValue`
+            - Decrypt data using KMS:
+                - `kms:Decrypt`
+            - Write logs to CloudWatch:
+                - `logs:CreateLogGroup`
+                - `logs:CreateLogStream`
+                - `logs:PutLogEvents`
 
 ---
 
-#### Step 1: Configure AWS IAM Role
-**Goal**: Create an IAM Role to enable AWS workloads (e.g., Lambda, ECS) to obtain temporary credentials for GCP access.
+## GCP Implementation
 
-1. **Create an AWS IAM Role**:
-   - Navigate to AWS Management Console > IAM > Roles > Create Role.
-   - Select **Custom trust policy** as the trusted entity type.
-   - Define the following trust policy:
-     ```json
-     {
-         "Version": "2012-10-17",
-         "Statement": [
-             {
-                 "Effect": "Allow",
-                 "Principal": {
-                     "Federated": "arn:aws:iam::123456789012:oidc-provider/sts.amazonaws.com"
-                 },
-                 "Action": "sts:AssumeRoleWithWebIdentity",
-                 "Condition": {
-                     "StringEquals": {
-                         "sts:aud": "sts.amazonaws.com"
-                     }
-                 }
-             }
-         ]
-     }
-     ```
-     Replace `123456789012` with your AWS account ID.
+Here are the equivalents we can use in GCP:
 
-2. **Assign Permissions to the Role**:
-   - Attach an inline policy granting the necessary permissions to the workload.
+### Service Accounts
+#### **CDS Cloud Function Service Account**
+- Used by GCP Cloud Functions for accessing GCS and publishing to Pub/Sub.
+- Permissions:
+  - `roles/storage.objectViewer`: Read access to GCS.
+  - `roles/pubsub.publisher`: Publish messages to Pub/Sub.
+  - `roles/cloudkms.cryptoKeyDecrypter`: Decrypt data using KMS.
 
-3. **Note the Role ARN**:
-   - Record the ARN of the role (e.g., `arn:aws:iam::123456789012:role/MyFederatedRole`).
+#### **CDS Mothership Service Account**
+- Used by the external server to access Pub/Sub and KMS.
+- Permissions:
+  - `roles/pubsub.subscriber`: Consume messages from Pub/Sub.
+  - `roles/cloudkms.cryptoKeyEncrypter`: Encrypt data using KMS.
 
-4. **Attach the Role to Your AWS Workload**:
-   - Assign this role to the Lambda function, ECS task, or other workload that requires access.
+### Sample Terraform Definitions
+1. **Create Service Accounts**:
+   ```hcl
+   resource "google_service_account" "cds_cloud_function_service_account" {
+     account_id   = "cds-cloud-function-service-account"
+     display_name = "CDS Cloud Function Service Account"
+   }
 
----
-
-#### Step 2: Create a GCP Service Account
-**Goal**: Map the AWS IAM Role to a GCP Service Account.
-
-1. **Create a Service Account**:
-   - Navigate to the GCP Console > IAM & Admin > Service Accounts.
-   - Create a new Service Account (e.g., `gcs-access-service-account`).
-   - Assign appropriate permissions:
-     - `roles/storage.objectViewer` to read objects in GCS.
-     - If we need broader control (e.g. event notifications), `roles/storage.objectAdmin` might be necessary.
-
-2. **Note the Service Account id** (e.g., `gcs-access-service-account@your-project.iam.gserviceaccount.com`).
-
----
-
-#### Step 3: Enable Workload Identity Federation in GCP
-**Goal**: Link AWS IAM to the GCP Service Account.
-
-1. **Create a Workload Identity Pool**:
-   - Navigate to GCP > IAM & Admin > Workload Identity Federation.
-   - Click **Create Pool**:
-     - **Name**: `aws-pool`.
-     - **Description**: Federated access for AWS.
-     - **Provider Type**: AWS.
-
-2. **Add a Workload Identity Provider**:
-   - In the pool, click **Add Provider**:
-     - **Name**: `aws-provider`.
-     - **Description**: Links AWS credentials to GCP.
-     - **AWS Account ID**: Replace with your AWS account ID.
-     - **Audience**: `sts.amazonaws.com` (default).
-
-3. **Map AWS Role to GCP Service Account**:
-   - Use `gcloud` to add an IAM policy binding:
-     ```bash
-     gcloud iam service-accounts add-iam-policy-binding gcs-access-service-account@your-project.iam.gserviceaccount.com \
-       --role="roles/iam.workloadIdentityUser" \
-       --member="principalSet://iam.googleapis.com/projects/[PROJECT_ID]/locations/global/workloadIdentityPools/aws-pool/attribute.aws-role/arn:aws:iam::123456789012:role/MyFederatedRole"
-     ```
-   - Replace placeholders:
-     - `[PROJECT_ID]`: Your GCP project ID.
-     - `123456789012`: Your AWS account ID.
-     - `MyFederatedRole`: Your AWS IAM Role name.
-
----
-
-#### Step 4: Download ADC Configuration for Federated Identities
-**Goal**: Configure workload to be able to authenticate with GCP.
-
-1. Go to **Workload Identity Pool** in GCP.
-2. Select your pool and click **Download Configuration**.
-3. Save the file (e.g., `aws-pool-config.json`).
-4. Include this file in your AWS workload environment.
-
----
-
-#### Step 5: Configure the Workload
-**Goal**: Enable GCP Client Libraries in AWS to access GCS.
-
-1. Set the `GOOGLE_APPLICATION_CREDENTIALS` environment variable:
-   ```bash
-   export GOOGLE_APPLICATION_CREDENTIALS=/path/to/aws-pool-config.json
-   ```
-
-2. Use GCP Client Libraries (e.g., `google-cloud-storage`).
-
----
-
-#### Validation
-**Test Access to GCS**:
-Here’s how I implemented the test in **Go**:
-
-1. **Install the library**:
-   ```bash
-   go get cloud.google.com/go/storage
-   ```
-
-2. **Code to List Buckets**:
-   ```go
-   package main
-
-   import (
-       "context"
-       "fmt"
-       "log"
-
-       "cloud.google.com/go/storage"
-   )
-
-   func main() {
-       // Create a context
-       ctx := context.Background()
-
-       // Initialize the GCS client
-       client, err := storage.NewClient(ctx)
-       if err != nil {
-           log.Fatalf("Failed to create GCS client: %v", err)
-       }
-       defer client.Close()
-
-       // List buckets
-       fmt.Println("Listing buckets:")
-       it := client.Buckets(ctx, "YOUR_PROJECT_ID") // Replace with GCP project ID
-       for {
-           bucketAttrs, err := it.Next()
-           if err != nil {
-               if err.Error() == "iterator: done" {
-                   break
-               }
-               log.Fatalf("Error listing buckets: %v", err)
-           }
-           fmt.Printf("- %s\n", bucketAttrs.Name)
-       }
+   resource "google_service_account" "cds_mothership_service_account" {
+     account_id   = "cds-mothership-service-account"
+     display_name = "CDS Mothership Service Account"
    }
    ```
 
-3. **Run the Program**:
-   - Ensure `GOOGLE_APPLICATION_CREDENTIALS` points to the configuration file.
-   - Execute the program:
-     ```bash
-     go run main.go
-     ```
+2. **Assign Roles to Grant Permissions**:
+    ```hcl
+    resource "google_project_iam_member" "cds_cloud_function_storage_access" {
+    project = var.project_id
+    role    = "roles/storage.objectViewer"
+    member  = "serviceAccount:${google_service_account.cds_cloud_function_service_account.email}"
+    }
+
+    resource "google_project_iam_member" "cds_cloud_function_pubsub_access" {
+    project = var.project_id
+    role    = "roles/pubsub.publisher"
+    member  = "serviceAccount:${google_service_account.cds_cloud_function_service_account.email}"
+    }
+
+    resource "google_project_iam_member" "cds_cloud_function_kms_decrypt" {
+    project = var.project_id
+    role    = "roles/cloudkms.cryptoKeyDecrypter"
+    member  = "serviceAccount:${google_service_account.cds_cloud_function_service_account.email}"
+    }
+
+    resource "google_project_iam_member" "cds_pubsub_access" {
+    project = var.project_id
+    role    = "roles/pubsub.subscriber"
+    member  = "serviceAccount:${google_service_account.cds_mothership_service_account.email}"
+    }
+
+    resource "google_project_iam_member" "cds_kms_encrypt" {
+    project = var.project_id
+    role    = "roles/cloudkms.cryptoKeyEncrypter"
+    member  = "serviceAccount:${google_service_account.cds_mothership_service_account.email}"
+    }
+
+    ```
+
+3. **Deploy Cloud Functions** (CDS Cloud Function Service Account):
+   ```hcl
+   resource "google_cloudfunctions_function" "example" {
+     name        = "example-function"
+     description = "An example Cloud Function"
+     runtime     = "go122"
+     entry_point = "functionEntryPoint"
+
+     source_archive_bucket = "${google_storage_bucket.source_bucket.name}"
+     source_archive_object = "${google_storage_bucket_object.source_archive.name}"
+     trigger_http          = true
+
+     service_account_email = google_service_account.cds_cloud_function_service_account.email
+   }
+   ```
+
+4. **Grant Permissions to Impersonate Service Accounts** (CDS Mothership Service Account):
+    ```hcl
+    resource "google_service_account_iam_member" "impersonation_role" {
+    service_account_id = google_service_account.cds_mothership_service_account.name
+    role               = "roles/iam.serviceAccountTokenCreator"
+    member             = "user:${var.user_email}"
+    }
+    ```
 
 ---
 
-#### Expected Outcome
-- The program should print a list of GCS buckets:
-  ```
-  Listing buckets:
-  - bucket-1
-  - bucket-2
-  - bucket-3
-  ```
+# Target Account IAM Setup
+
+## Overview
+The target account is configured by users (following instructions from the Zero Trust dashboard) to grant CDS components the permissions they need to access objects in cloud storage.
+
+## AWS Implementation
+
+1. **Create a New IAM Role**:
+   - Trusted entity: AWS account (Cloudflare CDS account ID).
+   - Add an **External ID** to prevent the confused deputy problem.
+
+2. **Attach Permissions**:
+   - S3 Access:
+     - `s3:GetObject`
+     - `s3:ListBucket`
+   - Example Policy:
+     ```json
+     {
+       "Version": "2012-10-17",
+       "Statement": [
+         {
+           "Effect": "Allow",
+           "Action": [
+             "s3:GetObject",
+             "s3:ListBucket"
+           ],
+           "Resource": ["arn:aws:s3:::bucket_name/*"]
+         }
+       ]
+     }
+     ```
+
+3. **Provide Role ARN**:
+   - Share with Cloudflare via Zero Trust dashboard.
+
+## GCP Implementation
+
+1. **Grant Bucket Access**:
+   - Assign the `roles/storage.objectViewer` role to the Alien Service Account.
+   ```bash
+   gcloud storage buckets add-iam-policy-binding gs://[BUCKET_NAME] \
+       --member="serviceAccount:[SERVICE_ACCOUNT_NAME]@[PROJECT_ID].iam.gserviceaccount.com" \
+       --role="roles/storage.objectViewer"
+   ```
+
+2. **Verify Access**:
+   - Ensure the Alien Cloud Functions can access objects in the GCS bucket.
+
+---
+
