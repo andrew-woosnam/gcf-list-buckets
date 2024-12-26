@@ -16,10 +16,7 @@ Workload Identity Federation (WIF) enables the Lambda function to authenticate w
    - Create a new workload identity pool (e.g., `aws-pool`).
 
 2. **Add an Identity Provider**:
-   - In the workload identity pool, add an AWS Identity Provider:
-     - **Provider Type**: `AWS`.
-     - **Issuer URL**: `https://sts.amazonaws.com`.
-     - **Audience**: Match the expected audience for your AWS role (e.g., `sts.amazonaws.com`).
+   - In the workload identity pool, add an AWS Identity Provider
 
 3. **Bind a GCP Service Account**:
    - Create or use an existing GCP service account (e.g., `gcs-access@your-project.iam.gserviceaccount.com`).

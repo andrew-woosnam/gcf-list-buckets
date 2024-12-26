@@ -1,35 +1,42 @@
-package main
+package gcf
 
 import (
-    "context"
-    "fmt"
-    "log"
-
-    "cloud.google.com/go/storage"
+	"context"
+	"fmt"
+	"net/http"
 )
 
-func main() {
-    // Create a context
-    ctx := context.Background()
+// ListBucketObjects is the entry point for the Cloud Function
+func ListBucketObjects(w http.ResponseWriter, r *http.Request) {
+	ctx := context.Background()
+	cfg := NewConfig()
 
-    // Initialize the GCS client
-    client, err := storage.NewClient(ctx)
-    if err != nil {
-        log.Fatalf("Failed to create GCS client: %v", err)
-    }
-    defer client.Close()
+	// Step 1: Create the credentials client
+	credentialsClient, err := createCredentialsClient(ctx)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to create credentials client: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer credentialsClient.Close()
 
-    // List buckets
-    fmt.Println("Listing buckets:")
-    it := client.Buckets(ctx, "YOUR_PROJECT_ID") // Replace with GCP project ID
-    for {
-        bucketAttrs, err := it.Next()
-        if err != nil {
-            if err.Error() == "iterator: done" {
-                break
-            }
-            log.Fatalf("Error listing buckets: %v", err)
-        }
-        fmt.Printf("- %s\n", bucketAttrs.Name)
-    }
+	// Step 2: Generate an access token for the target service account
+	accessToken, err := generateAccessToken(ctx, credentialsClient, cfg)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to generate access token: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Step 3: Create storage client with the generated token
+	storageClient, err := createStorageClient(ctx, accessToken)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to create storage client: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer storageClient.Close()
+
+	// Step 4: List objects in the target bucket
+	if err := listBucketObjects(ctx, storageClient, cfg.TargetBucketName, w); err != nil {
+		http.Error(w, fmt.Sprintf("Error listing objects: %v", err), http.StatusInternalServerError)
+		return
+	}
 }
