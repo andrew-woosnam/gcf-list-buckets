@@ -3,40 +3,36 @@ package gcf
 import (
 	"context"
 	"fmt"
-	"net/http"
 )
 
-// ListBucketObjects is the entry point for the Cloud Function
-func ListBucketObjects(w http.ResponseWriter, r *http.Request) {
-	ctx := context.Background()
+func main() {}
+
+// ListBucketObjects handles HTTP requests and lists objects in a GCS bucket
+func ListBucketObjects(ctx context.Context) {
+	// Load the configuration
 	cfg := NewConfig()
 
-	// Step 1: Create the credentials client
-	credentialsClient, err := createCredentialsClient(ctx)
+	// Hardcoded audience for GCS
+	audience := "https://storage.googleapis.com"
+
+	// Step 1: Create a storage client
+	client, err := createStorageClient(ctx, audience)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to create credentials client: %v", err), http.StatusInternalServerError)
+		fmt.Printf("Error creating storage client: %v\n", err)
 		return
 	}
-	defer credentialsClient.Close()
+	defer client.Close()
 
-	// Step 2: Generate an access token for the target service account
-	accessToken, err := generateAccessToken(ctx, credentialsClient, cfg)
+	// Step 2: List objects in the target bucket
+	objects, err := listObjectsInBucket(ctx, client, cfg.TargetBucket)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to generate access token: %v", err), http.StatusInternalServerError)
+		fmt.Printf("Error listing objects in bucket: %v\n", err)
 		return
 	}
 
-	// Step 3: Create storage client with the generated token
-	storageClient, err := createStorageClient(ctx, accessToken)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to create storage client: %v", err), http.StatusInternalServerError)
-		return
-	}
-	defer storageClient.Close()
-
-	// Step 4: List objects in the target bucket
-	if err := listBucketObjects(ctx, storageClient, cfg.TargetBucketName, w); err != nil {
-		http.Error(w, fmt.Sprintf("Error listing objects: %v", err), http.StatusInternalServerError)
-		return
+	// Step 3: Print the objects
+	fmt.Println("Objects in bucket:")
+	for _, obj := range objects {
+		fmt.Println(obj)
 	}
 }
