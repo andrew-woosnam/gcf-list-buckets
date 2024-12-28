@@ -23,8 +23,8 @@ type Config struct {
 // NewConfig initializes the configuration
 func NewConfig() *Config {
 	return &Config{
-		TargetBucket:         "my-super-cool-bucket",
-		TargetServiceAccount: "bucket-reader@striped-device-445917-b7.iam.gserviceaccount.com",
+		TargetBucket:         "tickleface-gcs",
+		TargetServiceAccount: "576375071060-compute@developer.gserviceaccount.com",
 	}
 }
 
