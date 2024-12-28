@@ -2,7 +2,9 @@ package gcf
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 
 	credentials "cloud.google.com/go/iam/credentials/apiv1"
 	credentialspb "cloud.google.com/go/iam/credentials/apiv1/credentialspb"
@@ -12,11 +14,13 @@ import (
 	"google.golang.org/api/option"
 )
 
+// Config stores the configuration for the GCF
 type Config struct {
 	TargetBucket         string
 	TargetServiceAccount string
 }
 
+// NewConfig initializes the configuration
 func NewConfig() *Config {
 	return &Config{
 		TargetBucket:         "my-super-cool-bucket",
@@ -24,22 +28,19 @@ func NewConfig() *Config {
 	}
 }
 
-// generates an access token for the target service account
+// generateAccessToken generates an access token for the target service account
 func generateAccessToken(ctx context.Context, targetServiceAccount string) (string, error) {
-	// Create an IAM Credentials client
 	iamClient, err := credentials.NewIamCredentialsClient(ctx, option.WithScopes("https://www.googleapis.com/auth/cloud-platform"))
 	if err != nil {
 		return "", fmt.Errorf("failed to create IAM Credentials client: %v", err)
 	}
 	defer iamClient.Close()
 
-	// Build the request
 	req := &credentialspb.GenerateAccessTokenRequest{
 		Name:  fmt.Sprintf("projects/-/serviceAccounts/%s", targetServiceAccount),
 		Scope: []string{"https://www.googleapis.com/auth/cloud-platform"},
 	}
 
-	// Call the GenerateAccessToken method
 	resp, err := iamClient.GenerateAccessToken(ctx, req)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate access token: %v", err)
@@ -48,15 +49,13 @@ func generateAccessToken(ctx context.Context, targetServiceAccount string) (stri
 	return resp.AccessToken, nil
 }
 
-// creates a storage client using the provided audience
+// createStorageClient creates a storage client using the provided audience
 func createStorageClient(ctx context.Context, audience string) (*storage.Client, error) {
-	// Generate a token source for the specified audience
 	tokenSource, err := idtoken.NewTokenSource(ctx, audience)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create token source: %v", err)
 	}
 
-	// Create a storage client using the token source
 	client, err := storage.NewClient(ctx, option.WithTokenSource(tokenSource))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create storage client: %v", err)
@@ -64,7 +63,7 @@ func createStorageClient(ctx context.Context, audience string) (*storage.Client,
 	return client, nil
 }
 
-// lists objects in the given GCS bucket
+// listObjectsInBucket lists objects in the given GCS bucket
 func listObjectsInBucket(ctx context.Context, client *storage.Client, bucketName string) ([]string, error) {
 	bucket := client.Bucket(bucketName)
 	it := bucket.Objects(ctx, nil)
@@ -84,37 +83,27 @@ func listObjectsInBucket(ctx context.Context, client *storage.Client, bucketName
 	return objects, nil
 }
 
-// handles HTTP requests and lists objects in a GCS bucket
-func ListBucketObjects(ctx context.Context) {
-	// Load the configuration
+// ListBucketObjects handles HTTP requests to list objects in a GCS bucket
+func ListBucketObjects(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	cfg := NewConfig()
-
-	// Hardcoded audience for GCS
 	audience := "https://storage.googleapis.com"
 
-	// Step 1: Create a storage client
 	client, err := createStorageClient(ctx, audience)
 	if err != nil {
-		fmt.Printf("Error creating storage client: %v\n", err)
+		http.Error(w, fmt.Sprintf("Error creating storage client: %v", err), http.StatusInternalServerError)
 		return
 	}
 	defer client.Close()
 
-	// Step 2: List objects in the target bucket
 	objects, err := listObjectsInBucket(ctx, client, cfg.TargetBucket)
 	if err != nil {
-		fmt.Printf("Error listing objects in bucket: %v\n", err)
+		http.Error(w, fmt.Sprintf("Error listing objects in bucket: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	// Step 3: Print the objects
-	fmt.Println("Objects in bucket:")
-	for _, obj := range objects {
-		fmt.Println(obj)
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(objects); err != nil {
+		http.Error(w, fmt.Sprintf("Error encoding response: %v", err), http.StatusInternalServerError)
 	}
-}
-
-func main() {
-	ctx := context.Background()
-	ListBucketObjects(ctx)
 }
