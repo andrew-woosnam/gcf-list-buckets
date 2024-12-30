@@ -12,7 +12,6 @@ import (
 
 	"google.golang.org/api/idtoken"
 	"google.golang.org/api/iterator"
-	"google.golang.org/api/oauth2/v2"
 	"google.golang.org/api/option"
 )
 
@@ -58,6 +57,7 @@ func decodeToken(token string) (map[string]interface{}, error) {
 
 // createStorageClient initializes a Cloud Storage client with the provided audience
 func createStorageClient(ctx context.Context, audience string, w http.ResponseWriter) (*storage.Client, error) {
+	// Create an OIDC token source for the specified audience
 	tokenSource, err := idtoken.NewTokenSource(ctx, audience)
 	if err != nil {
 		fmt.Fprintf(w, "Failed to create token source: %v\n", err)
@@ -72,16 +72,8 @@ func createStorageClient(ctx context.Context, audience string, w http.ResponseWr
 	}
 	fmt.Fprintf(w, "Access Token: %s\n", token.AccessToken)
 
-	claims, err := decodeToken(token.AccessToken)
-	if err != nil {
-		fmt.Fprintf(w, "Failed to decode token claims: %v\n", err)
-		return nil, fmt.Errorf("failed to decode token claims: %v", err)
-	}
-	fmt.Fprintf(w, "Token Claims: %+v\n", claims)
-
-	// Create OAuth2 token source for scoped credentials
-	oauth2TokenSource := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token.AccessToken})
-	client, err := storage.NewClient(ctx, option.WithTokenSource(oauth2TokenSource))
+	// Use the token source to create the Storage client
+	client, err := storage.NewClient(ctx, option.WithTokenSource(tokenSource))
 	if err != nil {
 		fmt.Fprintf(w, "Failed to create storage client: %v\n", err)
 		return nil, fmt.Errorf("failed to create storage client: %v", err)
@@ -90,8 +82,8 @@ func createStorageClient(ctx context.Context, audience string, w http.ResponseWr
 }
 
 // checkBucketAccess verifies permissions by attempting to access bucket metadata
-func checkBucketAccess(ctx context.Context, client *storage.Client, bucketName string, w http.ResponseWriter) error {
-	bucket := client.Bucket(bucketName)
+func checkBucketAccess(ctx context.Context, client *storage.Client, bucketName, userProject string, w http.ResponseWriter) error {
+	bucket := client.Bucket(bucketName).UserProject(userProject)
 
 	// Attempt to fetch bucket metadata to verify access
 	attrs, err := bucket.Attrs(ctx)
