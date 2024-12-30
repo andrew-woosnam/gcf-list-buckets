@@ -9,8 +9,10 @@ import (
 	"strings"
 
 	"cloud.google.com/go/storage"
+
 	"google.golang.org/api/idtoken"
 	"google.golang.org/api/iterator"
+	"google.golang.org/api/oauth2/v2"
 	"google.golang.org/api/option"
 )
 
@@ -54,6 +56,7 @@ func decodeToken(token string) (map[string]interface{}, error) {
 	return result, nil
 }
 
+// createStorageClient initializes a Cloud Storage client with the provided audience
 func createStorageClient(ctx context.Context, audience string, w http.ResponseWriter) (*storage.Client, error) {
 	tokenSource, err := idtoken.NewTokenSource(ctx, audience)
 	if err != nil {
@@ -69,7 +72,6 @@ func createStorageClient(ctx context.Context, audience string, w http.ResponseWr
 	}
 	fmt.Fprintf(w, "Access Token: %s\n", token.AccessToken)
 
-	// Decode and log token claims
 	claims, err := decodeToken(token.AccessToken)
 	if err != nil {
 		fmt.Fprintf(w, "Failed to decode token claims: %v\n", err)
@@ -77,8 +79,9 @@ func createStorageClient(ctx context.Context, audience string, w http.ResponseWr
 	}
 	fmt.Fprintf(w, "Token Claims: %+v\n", claims)
 
-	// Create the storage client
-	client, err := storage.NewClient(ctx, option.WithTokenSource(tokenSource))
+	// Create OAuth2 token source for scoped credentials
+	oauth2TokenSource := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token.AccessToken})
+	client, err := storage.NewClient(ctx, option.WithTokenSource(oauth2TokenSource))
 	if err != nil {
 		fmt.Fprintf(w, "Failed to create storage client: %v\n", err)
 		return nil, fmt.Errorf("failed to create storage client: %v", err)
@@ -86,20 +89,21 @@ func createStorageClient(ctx context.Context, audience string, w http.ResponseWr
 	return client, nil
 }
 
-// checkBucketAccess verifies permissions by attempting to access bucket attributes
-func checkBucketAccess(ctx context.Context, client *storage.Client, bucketName string, billingProjectID string) error {
-	bucket := client.Bucket(bucketName).UserProject(billingProjectID)
+// checkBucketAccess verifies permissions by attempting to access bucket metadata
+func checkBucketAccess(ctx context.Context, client *storage.Client, bucketName string, w http.ResponseWriter) error {
+	bucket := client.Bucket(bucketName)
 
-	// Verify bucket attributes
+	// Attempt to fetch bucket metadata to verify access
 	attrs, err := bucket.Attrs(ctx)
 	if err != nil {
+		fmt.Fprintf(w, "Failed to access bucket metadata: %v\n", err)
 		return fmt.Errorf("failed to access bucket '%s': %v", bucketName, err)
 	}
 
-	// Log bucket details
-	fmt.Printf("Bucket Name: %s\n", attrs.Name)
-	fmt.Printf("Bucket Location: %s\n", attrs.Location)
-	fmt.Printf("Requester Pays Enabled: %v\n", attrs.RequesterPays)
+	// Log bucket details for debugging
+	fmt.Fprintf(w, "Bucket Name: %s\n", attrs.Name)
+	fmt.Fprintf(w, "Bucket Location: %s\n", attrs.Location)
+	fmt.Fprintf(w, "Requester Pays: %t\n", attrs.RequesterPays)
 	return nil
 }
 
@@ -108,7 +112,6 @@ func ListBucketObjects(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	cfg := NewGCloudFunctionConfig()
 
-	// Debug Information
 	fmt.Fprintln(w, "Debug Information:")
 	fmt.Fprintf(w, "Storage Bucket: %s\n", cfg.StorageBucketName)
 	fmt.Fprintf(w, "Cloud Function Service Account: %s\n", cfg.CloudFunctionServiceAccount)
@@ -122,13 +125,13 @@ func ListBucketObjects(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "Error creating storage client: %v\n", err)
 		return
 	}
+	defer client.Close()
 	fmt.Fprintln(w, "Storage Client created successfully.")
-
 	fmt.Fprintln(w, "---")
 
 	// Step 2: Check Bucket Access
 	fmt.Fprintln(w, "Checking bucket access...")
-	err = checkBucketAccess(ctx, client, cfg.StorageBucketName, cfg.BillingProjectID)
+	err = checkBucketAccess(ctx, client, cfg.StorageBucketName, w)
 	if err != nil {
 		fmt.Fprintf(w, "Bucket access check failed: %v\n", err)
 		return
@@ -136,7 +139,7 @@ func ListBucketObjects(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, "Bucket access verified successfully.")
 	fmt.Fprintln(w, "---")
 
-	// Step 3: List Objects in Bucket
+	// Step 3: List Objects in the Bucket
 	fmt.Fprintln(w, "Listing bucket objects...")
 	it := client.Bucket(cfg.StorageBucketName).UserProject(cfg.BillingProjectID).Objects(ctx, nil)
 	for {
