@@ -10,6 +10,7 @@ import (
 
 	"cloud.google.com/go/storage"
 	"google.golang.org/api/idtoken"
+	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 )
 
@@ -33,7 +34,7 @@ func NewGCloudFunctionConfig() *GCloudFunctionConfig {
 
 // decodeToken decodes and returns the payload of a JWT token
 func decodeToken(token string) (map[string]interface{}, error) {
-	parts := splitToken(token)
+	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
 		return nil, fmt.Errorf("invalid JWT format: expected 3 parts but got %d", len(parts))
 	}
@@ -53,25 +54,53 @@ func decodeToken(token string) (map[string]interface{}, error) {
 	return result, nil
 }
 
-// splitToken splits a JWT token into its parts (header, payload, signature)
-func splitToken(token string) []string {
-	return strings.Split(token, ".")
-}
-
-// createStorageClient initializes a Cloud Storage client with the provided audience
-func createStorageClient(ctx context.Context, audience string) (*storage.Client, error) {
-	// Create an OIDC token source for the specified audience
+func createStorageClient(ctx context.Context, audience string, w http.ResponseWriter) (*storage.Client, error) {
 	tokenSource, err := idtoken.NewTokenSource(ctx, audience)
 	if err != nil {
+		fmt.Fprintf(w, "Failed to create token source: %v\n", err)
 		return nil, fmt.Errorf("failed to create token source: %v", err)
 	}
 
-	// Use the token source to create a Storage client
+	// Retrieve and log the token
+	token, err := tokenSource.Token()
+	if err != nil {
+		fmt.Fprintf(w, "Failed to retrieve token: %v\n", err)
+		return nil, fmt.Errorf("failed to retrieve token: %v", err)
+	}
+	fmt.Fprintf(w, "Access Token: %s\n", token.AccessToken)
+
+	// Decode and log token claims
+	claims, err := decodeToken(token.AccessToken)
+	if err != nil {
+		fmt.Fprintf(w, "Failed to decode token claims: %v\n", err)
+		return nil, fmt.Errorf("failed to decode token claims: %v", err)
+	}
+	fmt.Fprintf(w, "Token Claims: %+v\n", claims)
+
+	// Create the storage client
 	client, err := storage.NewClient(ctx, option.WithTokenSource(tokenSource))
 	if err != nil {
+		fmt.Fprintf(w, "Failed to create storage client: %v\n", err)
 		return nil, fmt.Errorf("failed to create storage client: %v", err)
 	}
 	return client, nil
+}
+
+// checkBucketAccess verifies permissions by attempting to access bucket attributes
+func checkBucketAccess(ctx context.Context, client *storage.Client, bucketName string, billingProjectID string) error {
+	bucket := client.Bucket(bucketName).UserProject(billingProjectID)
+
+	// Verify bucket attributes
+	attrs, err := bucket.Attrs(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to access bucket '%s': %v", bucketName, err)
+	}
+
+	// Log bucket details
+	fmt.Printf("Bucket Name: %s\n", attrs.Name)
+	fmt.Printf("Bucket Location: %s\n", attrs.Location)
+	fmt.Printf("Requester Pays Enabled: %v\n", attrs.RequesterPays)
+	return nil
 }
 
 func ListBucketObjects(w http.ResponseWriter, r *http.Request) {
@@ -86,29 +115,40 @@ func ListBucketObjects(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "Billing Project ID: %s\n", cfg.BillingProjectID)
 	fmt.Fprintln(w, "---")
 
-	// Step 1: Create Storage Client using OIDC Token
-	fmt.Fprintln(w, "Step 1: Creating Storage Client with OIDC Token...")
-	client, err := createStorageClient(ctx, cfg.StorageClientAudience)
+	// Step 1: Create Storage Client
+	fmt.Fprintln(w, "Creating Storage Client...")
+	client, err := createStorageClient(ctx, cfg.StorageClientAudience, w)
 	if err != nil {
 		fmt.Fprintf(w, "Error creating storage client: %v\n", err)
 		return
 	}
-	defer client.Close()
 	fmt.Fprintln(w, "Storage Client created successfully.")
+
 	fmt.Fprintln(w, "---")
 
-	// Step 2: List objects in the bucket
-	fmt.Fprintln(w, "Step 2: Listing bucket objects...")
-	it := client.Bucket(cfg.StorageBucketName).Objects(ctx, nil)
+	// Step 2: Check Bucket Access
+	fmt.Fprintln(w, "Checking bucket access...")
+	err = checkBucketAccess(ctx, client, cfg.StorageBucketName, cfg.BillingProjectID)
+	if err != nil {
+		fmt.Fprintf(w, "Bucket access check failed: %v\n", err)
+		return
+	}
+	fmt.Fprintln(w, "Bucket access verified successfully.")
+	fmt.Fprintln(w, "---")
+
+	// Step 3: List Objects in Bucket
+	fmt.Fprintln(w, "Listing bucket objects...")
+	it := client.Bucket(cfg.StorageBucketName).UserProject(cfg.BillingProjectID).Objects(ctx, nil)
 	for {
 		objAttrs, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
 		if err != nil {
-			if err.Error() == "iterator.Done" {
-				break
-			}
 			fmt.Fprintf(w, "Error listing objects: %v\n", err)
 			return
 		}
 		fmt.Fprintf(w, "Object: %s\n", objAttrs.Name)
 	}
+	fmt.Fprintln(w, "---")
 }
