@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"cloud.google.com/go/storage"
-
 	"google.golang.org/api/idtoken"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
@@ -40,13 +39,11 @@ func decodeToken(token string) (map[string]interface{}, error) {
 		return nil, fmt.Errorf("invalid JWT format: expected 3 parts but got %d", len(parts))
 	}
 
-	// Decode the payload (middle part of the JWT)
 	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode token payload: %v", err)
 	}
 
-	// Unmarshal the payload into a map
 	var result map[string]interface{}
 	if err := json.Unmarshal(payload, &result); err != nil {
 		return nil, fmt.Errorf("failed to parse token payload: %v", err)
@@ -57,26 +54,23 @@ func decodeToken(token string) (map[string]interface{}, error) {
 
 // createStorageClient initializes a Cloud Storage client with the provided audience
 func createStorageClient(ctx context.Context, audience string, w http.ResponseWriter) (*storage.Client, error) {
-	// Create an OIDC token source for the specified audience
 	tokenSource, err := idtoken.NewTokenSource(ctx, audience)
 	if err != nil {
 		fmt.Fprintf(w, "Failed to create token source: %v\n", err)
-		return nil, fmt.Errorf("failed to create token source: %v", err)
+		return nil, err
 	}
 
-	// Retrieve and log the token
 	token, err := tokenSource.Token()
 	if err != nil {
 		fmt.Fprintf(w, "Failed to retrieve token: %v\n", err)
-		return nil, fmt.Errorf("failed to retrieve token: %v", err)
+		return nil, err
 	}
 	fmt.Fprintf(w, "Access Token: %s\n", token.AccessToken)
 
-	// Use the token source to create the Storage client
 	client, err := storage.NewClient(ctx, option.WithTokenSource(tokenSource))
 	if err != nil {
 		fmt.Fprintf(w, "Failed to create storage client: %v\n", err)
-		return nil, fmt.Errorf("failed to create storage client: %v", err)
+		return nil, err
 	}
 	return client, nil
 }
@@ -85,20 +79,19 @@ func createStorageClient(ctx context.Context, audience string, w http.ResponseWr
 func checkBucketAccess(ctx context.Context, client *storage.Client, bucketName, userProject string, w http.ResponseWriter) error {
 	bucket := client.Bucket(bucketName).UserProject(userProject)
 
-	// Attempt to fetch bucket metadata to verify access
 	attrs, err := bucket.Attrs(ctx)
 	if err != nil {
 		fmt.Fprintf(w, "Failed to access bucket metadata: %v\n", err)
-		return fmt.Errorf("failed to access bucket '%s': %v", bucketName, err)
+		return err
 	}
 
-	// Log bucket details for debugging
 	fmt.Fprintf(w, "Bucket Name: %s\n", attrs.Name)
 	fmt.Fprintf(w, "Bucket Location: %s\n", attrs.Location)
 	fmt.Fprintf(w, "Requester Pays: %t\n", attrs.RequesterPays)
 	return nil
 }
 
+// ListBucketObjects is the entry point for the Cloud Function
 func ListBucketObjects(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 	ctx := r.Context()
@@ -110,7 +103,6 @@ func ListBucketObjects(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "Billing Project ID: %s\n", cfg.BillingProjectID)
 	fmt.Fprintln(w, "---")
 
-	// Step 1: Create Storage Client
 	fmt.Fprintln(w, "Creating Storage Client...")
 	client, err := createStorageClient(ctx, cfg.StorageClientAudience, w)
 	if err != nil {
@@ -121,9 +113,8 @@ func ListBucketObjects(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, "Storage Client created successfully.")
 	fmt.Fprintln(w, "---")
 
-	// Step 2: Check Bucket Access
 	fmt.Fprintln(w, "Checking bucket access...")
-	err = checkBucketAccess(ctx, client, cfg.StorageBucketName, w)
+	err = checkBucketAccess(ctx, client, cfg.StorageBucketName, cfg.BillingProjectID, w)
 	if err != nil {
 		fmt.Fprintf(w, "Bucket access check failed: %v\n", err)
 		return
@@ -131,7 +122,6 @@ func ListBucketObjects(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, "Bucket access verified successfully.")
 	fmt.Fprintln(w, "---")
 
-	// Step 3: List Objects in the Bucket
 	fmt.Fprintln(w, "Listing bucket objects...")
 	it := client.Bucket(cfg.StorageBucketName).UserProject(cfg.BillingProjectID).Objects(ctx, nil)
 	for {
