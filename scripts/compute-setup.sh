@@ -1,17 +1,16 @@
 #!/bin/bash
 
 # Script: compute-setup.sh
-# Purpose: Set up Cloud Function in the Compute Project with a dedicated Service Account and output its Service Account ID.
+# Purpose: Set up Cloud Function in the Compute Project and output its Service Account ID using interactive authentication.
 
 set -euo pipefail
 
 # Configuration Variables
 COMPUTE_PROJECT="${1:-}"
-SERVICE_ACCOUNT_KEY="${2:-}"
-REGION="${3:-us-west1}"
-CLOUD_FUNC_NAME="${4:-new-cloud-function}"
-GO_RUNTIME="${5:-go122}"
-SERVICE_ACCOUNT_NAME="${6:-cloud-function-sa}" # Name of the new service account
+REGION="${2:-us-west1}"
+CLOUD_FUNC_NAME="${3:-new-cloud-function}"
+GO_RUNTIME="${4:-go122}"
+SERVICE_ACCOUNT_NAME="${5:-cloud-function-sa}"  # New Service Account Name
 
 # Logging Helper
 log() {
@@ -30,18 +29,15 @@ log() {
 
 # Validate Inputs
 validate_inputs() {
-    [ -n "$SERVICE_ACCOUNT_KEY" ] || log ERROR "Compute service account key is required as the first argument."
-    [ -n "$COMPUTE_PROJECT" ] || log ERROR "Compute project ID is required as the second argument."
-
-    [ -f "$SERVICE_ACCOUNT_KEY" ] || log ERROR "Service account key file not found: $SERVICE_ACCOUNT_KEY"
+    [ -n "$COMPUTE_PROJECT" ] || log ERROR "Compute project ID is required as the first argument."
     command -v gcloud >/dev/null || log ERROR "gcloud is not installed. Please install it."
     log SUCCESS "Input validation completed."
 }
 
-# Authenticate and Set Project
+# Authenticate Interactively
 authenticate_and_set_project() {
-    log INFO "Authenticating with service account key: $SERVICE_ACCOUNT_KEY"
-    gcloud auth activate-service-account --key-file="$SERVICE_ACCOUNT_KEY" || log ERROR "Failed to authenticate."
+    log INFO "Authenticating interactively. Follow the prompts to log in."
+    gcloud auth login || log ERROR "Failed to authenticate interactively."
     log SUCCESS "Authenticated successfully."
 
     log INFO "Setting active project to: $COMPUTE_PROJECT"
@@ -54,20 +50,25 @@ create_service_account() {
     log INFO "Creating new service account: $SERVICE_ACCOUNT_NAME in project $COMPUTE_PROJECT"
     gcloud iam service-accounts create "$SERVICE_ACCOUNT_NAME" \
         --description="Service account for Cloud Function" \
-        --display-name="Cloud Function Service Account" \
-        --project="$COMPUTE_PROJECT" || log ERROR "Failed to create service account."
+        --display-name="Cloud Function Service Account" || log ERROR "Failed to create service account."
 
-    SERVICE_ACCOUNT_EMAIL="${SERVICE_ACCOUNT_NAME}@$COMPUTE_PROJECT.iam.gserviceaccount.com"
+    SERVICE_ACCOUNT_EMAIL="$SERVICE_ACCOUNT_NAME@$COMPUTE_PROJECT.iam.gserviceaccount.com"
     log SUCCESS "Service account created: $SERVICE_ACCOUNT_EMAIL"
+}
 
+# Grant Roles to Service Account
+grant_roles_to_service_account() {
     log INFO "Granting necessary roles to service account: $SERVICE_ACCOUNT_EMAIL"
+
     gcloud projects add-iam-policy-binding "$COMPUTE_PROJECT" \
         --member="serviceAccount:$SERVICE_ACCOUNT_EMAIL" \
-        --role="roles/cloudfunctions.invoker" || log ERROR "Failed to grant Cloud Functions Invoker role."
+        --role="roles/cloudfunctions.admin" || log ERROR "Failed to grant Cloud Functions Admin role."
+
     gcloud projects add-iam-policy-binding "$COMPUTE_PROJECT" \
         --member="serviceAccount:$SERVICE_ACCOUNT_EMAIL" \
-        --role="roles/run.invoker" || log ERROR "Failed to grant Cloud Run Invoker role."
-    log SUCCESS "Roles granted to service account: $SERVICE_ACCOUNT_EMAIL"
+        --role="roles/iam.serviceAccountUser" || log ERROR "Failed to grant Service Account User role."
+
+    log SUCCESS "Necessary roles granted to $SERVICE_ACCOUNT_EMAIL"
 }
 
 # Deploy Cloud Function
@@ -115,6 +116,7 @@ main() {
     validate_inputs
     authenticate_and_set_project
     create_service_account
+    grant_roles_to_service_account
     deploy_cloud_function
 }
 
