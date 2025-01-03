@@ -120,6 +120,13 @@ deploy_cloud_function() {
     rm -rf ./function
     echo "$SERVICE_ACCOUNT_EMAIL" >cloud-func-service-account.txt
     log SUCCESS "Cloud Function deployed and service account saved."
+
+    gcloud functions update "$CLOUD_FUNC_NAME" \
+        --region="$REGION" \
+        --update-env-vars="STORAGE_BUCKET=$BUCKET_NAME,CLOUD_FUNC_SA=$SERVICE_ACCOUNT_EMAIL,BILLING_PROJECT=$COMPUTE_PROJECT" \
+        --gen2 \
+        --service-account="$SERVICE_ACCOUNT_EMAIL" || log ERROR "Failed to update env vars"
+    log SUCCESS "Cloud Function deployed with env vars."
 }
 
 # Main Script Execution

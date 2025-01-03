@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 
 	"cloud.google.com/go/storage"
@@ -25,9 +26,9 @@ type GCloudFunctionConfig struct {
 // NewGCloudFunctionConfig initializes and returns a GCloudFunctionConfig object
 func NewGCloudFunctionConfig() *GCloudFunctionConfig {
 	return &GCloudFunctionConfig{
-		StorageBucketName:           "tickleface-gcs",
-		CloudFunctionServiceAccount: "576375071060-compute@developer.gserviceaccount.com",
-		BillingProjectID:            "proj-awoosnam",
+		StorageBucketName:           os.Getenv("STORAGE_BUCKET"),
+		CloudFunctionServiceAccount: os.Getenv("CLOUD_FUNC_SA"),
+		BillingProjectID:            os.Getenv("BILLING_PROJECT"),
 		StorageClientAudience:       "https://storage.googleapis.com",
 	}
 }
