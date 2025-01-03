@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Script: target-setup.sh
+# Fixed: target-setup.sh
 # Purpose: Set up GCS bucket in the Target Project and configure IAM permissions for Cloud Function Service Account.
 
 set -euo pipefail
@@ -8,8 +8,8 @@ set -euo pipefail
 # Configuration Variables
 TARGET_PROJECT="${1:-}"
 REGION="${2:-us-west1}"
-BUCKET_NAME="${3:-default-bucket-${TARGET_PROJECT}}"  # Include project name for global uniqueness
-ENABLE_UBLA="${4:-false}"  # Enable Uniform Bucket-Level Access (default: false)
+BUCKET_NAME="${3:-default-bucket-${TARGET_PROJECT}}"  
+ENABLE_UBLA="${4:-false}"
 CLOUD_FUNC_SA_FILE="cloud-func-service-account.txt"
 
 # Logging Helper
@@ -19,8 +19,7 @@ log() {
     case "$level" in
         INFO) echo -e "[INFO] $message" ;;
         SUCCESS) echo -e "\033[1;32m✓ $message\033[0m" ;;
-        ERROR)
-            echo -e "\033[1;31m✗ $message\033[0m" >&2
+        ERROR) echo -e "\033[1;31m✗ $message\033[0m" >&2
             exit 1
             ;;
         *) echo -e "[LOG] $message" ;;
@@ -35,37 +34,6 @@ validate_inputs() {
     log SUCCESS "Input validation completed."
 }
 
-# Verify Authentication and Active Project
-verify_auth_and_project() {
-    log INFO "Verifying authentication and active project..."
-
-    local active_account
-    local active_project
-
-    active_account=$(gcloud auth list --filter="status:ACTIVE" --format="value(account)" 2>/dev/null || echo "")
-    active_project=$(gcloud config get-value project 2>/dev/null || echo "")
-
-    if [[ -z "$active_account" || -z "$active_project" ]]; then
-        log ERROR "No active account or project found. Please authenticate and set a project."
-        authenticate_and_set_project
-        return
-    fi
-
-    log INFO "Current active account: $active_account"
-    log INFO "Current active project: $active_project"
-
-    if [[ "$active_project" != "$TARGET_PROJECT" ]]; then
-        log INFO "Expected project ($TARGET_PROJECT) does not match the active project ($active_project)."
-    fi
-
-    read -p "Proceed with the current account and project? (Y/N): " -r choice
-    if [[ "$choice" != "Y" && "$choice" != "y" ]]; then
-        authenticate_and_set_project
-    else
-        log SUCCESS "Continuing with current authentication and project."
-    fi
-}
-
 # Authenticate and Set Project
 authenticate_and_set_project() {
     log INFO "Authenticating interactively. Follow the prompts to log in."
@@ -75,6 +43,26 @@ authenticate_and_set_project() {
     log INFO "Setting active project to: $TARGET_PROJECT"
     gcloud config set project "$TARGET_PROJECT" || log ERROR "Failed to set project: $TARGET_PROJECT"
     log SUCCESS "Active project set to $TARGET_PROJECT."
+}
+
+# Verify Authentication and Active Project
+verify_auth_and_project() {
+    log INFO "Verifying authentication and active project..."
+    local active_project
+    active_project=$(gcloud config get-value project 2>/dev/null || echo "")
+
+    if [[ -z "$active_project" ]]; then
+        log ERROR "No active project set. Please authenticate and set a project."
+        authenticate_and_set_project
+        return
+    fi
+
+    if [[ "$active_project" != "$TARGET_PROJECT" ]]; then
+        log INFO "Expected project ($TARGET_PROJECT) does not match the active project ($active_project)."
+        authenticate_and_set_project
+    else
+        log SUCCESS "Continuing with active project: $active_project."
+    fi
 }
 
 # Create GCS Bucket
@@ -103,17 +91,13 @@ configure_bucket_iam() {
     local cloud_func_sa
     cloud_func_sa=$(cat "$CLOUD_FUNC_SA_FILE")
     local bucket_url="gs://$BUCKET_NAME"
+    log INFO "Granting Cloud Function service account ($cloud_func_sa) access to bucket $bucket_url"
 
-    log INFO "Granting Cloud Function service account ($cloud_func_sa) access to GCS bucket: $bucket_url"
-    if gcloud storage buckets get-iam-policy "$bucket_url" --format="json" | grep -q "serviceAccount:$cloud_func_sa"; then
-        log SUCCESS "IAM permissions already granted: $cloud_func_sa can view $bucket_url."
-    else
-        gcloud storage buckets add-iam-policy-binding "$bucket_url" \
-            --member="serviceAccount:$cloud_func_sa" \
-            --role="roles/storage.objectViewer" \
-            --project="$TARGET_PROJECT" || log ERROR "Failed to grant IAM permissions."
-        log SUCCESS "IAM permissions granted: $cloud_func_sa can view $bucket_url."
-    fi
+    gcloud storage buckets add-iam-policy-binding "$bucket_url" \
+        --member="serviceAccount:$cloud_func_sa" \
+        --role="roles/storage.objectViewer" \
+        --project="$TARGET_PROJECT" || log ERROR "Failed to grant IAM permissions."
+    log SUCCESS "IAM permissions granted for $cloud_func_sa on bucket $bucket_url."
 }
 
 upload_file_with_contents() {
