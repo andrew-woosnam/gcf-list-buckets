@@ -116,12 +116,28 @@ configure_bucket_iam() {
     fi
 }
 
+upload_file_with_contents() {
+    local bucket_url="gs://$BUCKET_NAME"
+    local file_name="file1.txt"
+    local file_contents="123-45-6789"
+
+    log INFO "Creating file: $file_name with contents: $file_contents"
+    echo "$file_contents" > "$file_name" || log ERROR "Failed to create file $file_name with contents."
+
+    log INFO "Uploading $file_name to $bucket_url"
+    gcloud storage cp "$file_name" "$bucket_url/" || log ERROR "Failed to upload $file_name to $bucket_url."
+
+    log SUCCESS "File $file_name successfully uploaded to $bucket_url."
+    rm -f "$file_name" || log ERROR "Failed to delete local file $file_name."
+}
+
 # Main Script Execution
 main() {
     validate_inputs
     verify_auth_and_project
     create_bucket
     configure_bucket_iam
+    upload_file_with_contents
 }
 
 main "$@"
