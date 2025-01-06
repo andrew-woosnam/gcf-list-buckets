@@ -5,14 +5,11 @@
 
 set -euo pipefail
 
-# Configuration Variables
-COMPUTE_PROJECT="${1:-}"
-GO_FUNC_FILE="${2:-}"
-GO_MOD_FILE="${3:-}"
-REGION="${4:-us-west1}"
-CLOUD_FUNC_NAME="${5:-new-cloud-function}"
-GO_RUNTIME="${6:-go122}"
-SERVICE_ACCOUNT_NAME="${7:-cloud-function-sa}"
+# Args
+GO_FUNC_FILE="${1:-}"
+GO_MOD_FILE="${2:-}"
+
+source config.env
 
 # Logging Helper
 log() {
@@ -103,7 +100,7 @@ deploy_cloud_function() {
         return
     fi
 
-    log INFO "Deploying Cloud Function: $CLOUD_FUNC_NAME."
+    log INFO "Deploying/Updating Cloud Function: $CLOUD_FUNC_NAME with env vars."
     mkdir -p ./function
     cp "$GO_FUNC_FILE" ./function/main.go
     cp "$GO_MOD_FILE" ./function/go.mod
@@ -115,18 +112,13 @@ deploy_cloud_function() {
         --source="./function" \
         --trigger-http \
         --gen2 \
-        --service-account="$SERVICE_ACCOUNT_EMAIL" || log ERROR "Failed to deploy Cloud Function."
+        --service-account="$SERVICE_ACCOUNT_EMAIL" \
+        --allow-unauthenticated \
+        --update-env-vars="STORAGE_BUCKET=$BUCKET_NAME,CLOUD_FUNC_SA=$SERVICE_ACCOUNT_EMAIL,BILLING_PROJECT=$COMPUTE_PROJECT,GOOGLE_API_GO_CLIENT_LOG=debug" || log ERROR "Failed to deploy/update Cloud Function."
 
     rm -rf ./function
     echo "$SERVICE_ACCOUNT_EMAIL" >cloud-func-service-account.txt
-    log SUCCESS "Cloud Function deployed and service account saved."
-
-    gcloud functions update "$CLOUD_FUNC_NAME" \
-        --region="$REGION" \
-        --update-env-vars="STORAGE_BUCKET=$BUCKET_NAME,CLOUD_FUNC_SA=$SERVICE_ACCOUNT_EMAIL,BILLING_PROJECT=$COMPUTE_PROJECT" \
-        --gen2 \
-        --service-account="$SERVICE_ACCOUNT_EMAIL" || log ERROR "Failed to update env vars"
-    log SUCCESS "Cloud Function deployed with env vars."
+    log SUCCESS "Cloud Function deployed/updated and service account saved."
 }
 
 # Main Script Execution

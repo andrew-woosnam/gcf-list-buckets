@@ -5,11 +5,7 @@
 
 set -euo pipefail
 
-# Configuration Variables
-TARGET_PROJECT="${1:-}"
-REGION="${2:-us-west1}"
-BUCKET_NAME="${3:-default-bucket-${TARGET_PROJECT}}"  
-ENABLE_UBLA="${4:-false}"
+source config.env
 CLOUD_FUNC_SA_FILE="cloud-func-service-account.txt"
 
 # Logging Helper

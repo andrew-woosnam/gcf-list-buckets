@@ -2,17 +2,17 @@ package gcf
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
-	"strings"
 
 	"cloud.google.com/go/storage"
+	"golang.org/x/oauth2/google"
+	"google.golang.org/api/googleapi"
 	"google.golang.org/api/idtoken"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
+	storagev1 "google.golang.org/api/storage/v1"
 )
 
 // GCloudFunctionConfig stores configuration for a Google Cloud Function
@@ -33,24 +33,20 @@ func NewGCloudFunctionConfig() *GCloudFunctionConfig {
 	}
 }
 
-// decodeToken decodes and returns the payload of a JWT token
-func decodeToken(token string) (map[string]interface{}, error) {
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
-		return nil, fmt.Errorf("invalid JWT format: expected 3 parts but got %d", len(parts))
-	}
-
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+func createStorageClientWithOAuth(ctx context.Context) (*storage.Client, error) {
+	// Use the default service account's token source with the required scope.
+	tokenSource, err := google.DefaultTokenSource(ctx, storagev1.CloudPlatformScope)
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode token payload: %v", err)
+		return nil, fmt.Errorf("Failed to create token source: %v", err)
 	}
 
-	var result map[string]interface{}
-	if err := json.Unmarshal(payload, &result); err != nil {
-		return nil, fmt.Errorf("failed to parse token payload: %v", err)
+	// Create a Storage client with the OAuth token source.
+	client, err := storage.NewClient(ctx, option.WithTokenSource(tokenSource))
+	if err != nil {
+		return nil, fmt.Errorf("Failed to create storage client: %v", err)
 	}
 
-	return result, nil
+	return client, nil
 }
 
 // createStorageClient initializes a Cloud Storage client with the provided audience
@@ -82,7 +78,7 @@ func checkBucketAccess(ctx context.Context, client *storage.Client, bucketName, 
 
 	attrs, err := bucket.Attrs(ctx)
 	if err != nil {
-		fmt.Fprintf(w, "Failed to access bucket metadata: %v\n", err)
+		handleError(w, err)
 		return err
 	}
 
@@ -99,13 +95,14 @@ func ListBucketObjects(w http.ResponseWriter, r *http.Request) {
 	cfg := NewGCloudFunctionConfig()
 
 	fmt.Fprintln(w, "Debug Information:")
-	fmt.Fprintf(w, "Storage Bucket: %s\n", cfg.StorageBucketName)
+	fmt.Fprintf(w, "Target Storage Bucket: %s\n", cfg.StorageBucketName)
 	fmt.Fprintf(w, "Cloud Function Service Account: %s\n", cfg.CloudFunctionServiceAccount)
 	fmt.Fprintf(w, "Billing Project ID: %s\n", cfg.BillingProjectID)
 	fmt.Fprintln(w, "---")
 
-	fmt.Fprintln(w, "Creating Storage Client...")
-	client, err := createStorageClient(ctx, cfg.StorageClientAudience, w)
+	// Create the Storage Client using OAuth
+	fmt.Fprintln(w, "Creating Storage Client with OAuth...")
+	client, err := createStorageClientWithOAuth(ctx)
 	if err != nil {
 		fmt.Fprintf(w, "Error creating storage client: %v\n", err)
 		return
@@ -114,16 +111,17 @@ func ListBucketObjects(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintln(w, "Storage Client created successfully.")
 	fmt.Fprintln(w, "---")
 
-	fmt.Fprintln(w, "Checking bucket access...")
+	// Check if the target bucket is accessible
+	fmt.Fprintln(w, "Checking access to the target bucket...")
 	err = checkBucketAccess(ctx, client, cfg.StorageBucketName, cfg.BillingProjectID, w)
 	if err != nil {
-		fmt.Fprintf(w, "Bucket access check failed: %v\n", err)
+		fmt.Fprintf(w, "Error accessing target bucket: %v\n", err)
 		return
 	}
-	fmt.Fprintln(w, "Bucket access verified successfully.")
 	fmt.Fprintln(w, "---")
 
-	fmt.Fprintln(w, "Listing bucket objects...")
+	// List objects in the target bucket
+	fmt.Fprintln(w, "Listing objects in the target bucket...")
 	it := client.Bucket(cfg.StorageBucketName).UserProject(cfg.BillingProjectID).Objects(ctx, nil)
 	for {
 		objAttrs, err := it.Next()
@@ -137,4 +135,18 @@ func ListBucketObjects(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "Object: %s\n", objAttrs.Name)
 	}
 	fmt.Fprintln(w, "---")
+}
+
+func handleError(w http.ResponseWriter, err error) {
+	if gErr, ok := err.(*googleapi.Error); ok {
+		fmt.Fprintf(w, "Error Code: %d\n", gErr.Code)
+		fmt.Fprintf(w, "Error Message: %s\n", gErr.Message)
+		fmt.Fprintf(w, "Error Body: %s\n", gErr.Body)
+		for _, detail := range gErr.Errors {
+			fmt.Fprintf(w, "Reason: %s, Message: %s\n", detail.Reason, detail.Message)
+		}
+	} else {
+		// Generic error fallback
+		fmt.Fprintf(w, "Unknown error: %v\n", err)
+	}
 }
