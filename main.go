@@ -3,6 +3,7 @@ package gcf
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 
@@ -66,6 +67,7 @@ func ListBucketObjects(w http.ResponseWriter, r *http.Request) {
 	}
 
 	it := client.Bucket(cfg.StorageBucketName).UserProject(cfg.BillingProjectID).Objects(ctx, nil)
+	var firstObjectName string
 	for {
 		objAttrs, err := it.Next()
 		if err == iterator.Done {
@@ -76,7 +78,41 @@ func ListBucketObjects(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		fmt.Fprintf(w, "Object: %s\n", objAttrs.Name)
+		if firstObjectName == "" {
+			firstObjectName = objAttrs.Name
+		}
 	}
+
+	if firstObjectName == "" {
+		fmt.Fprintln(w, "No objects found in the bucket.")
+		return
+	}
+
+	fmt.Fprintf(w, "Downloading first object: %s\n", firstObjectName)
+	if err := downloadObject(ctx, client, cfg.StorageBucketName, firstObjectName, w); err != nil {
+		fmt.Fprintf(w, "Error downloading object: %v\n", err)
+	}
+}
+
+func downloadObject(ctx context.Context, client *storage.Client, bucketName, objectName string, w http.ResponseWriter) error {
+	rc, err := client.Bucket(bucketName).Object(objectName).NewReader(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to create reader for object %s: %v", objectName, err)
+	}
+	defer rc.Close()
+
+	localFile, err := os.Create(objectName)
+	if err != nil {
+		return fmt.Errorf("failed to create local file: %v", err)
+	}
+	defer localFile.Close()
+
+	if _, err := io.Copy(localFile, rc); err != nil {
+		return fmt.Errorf("failed to copy object data to local file: %v", err)
+	}
+
+	fmt.Fprintf(w, "Downloaded object %s to local file %s\n", objectName, objectName)
+	return nil
 }
 
 func handleError(w http.ResponseWriter, err error) {
