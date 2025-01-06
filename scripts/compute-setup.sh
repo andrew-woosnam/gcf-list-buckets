@@ -85,7 +85,7 @@ create_or_get_service_account() {
 # Grant Necessary Roles
 grant_roles() {
     log INFO "Granting roles to service account: $SERVICE_ACCOUNT_EMAIL."
-    for role in roles/cloudfunctions.admin roles/iam.serviceAccountUser; do
+    for role in roles/cloudfunctions.admin roles/iam.serviceAccountUser roles/serviceusage.serviceUsageConsumer; do
         gcloud projects add-iam-policy-binding "$COMPUTE_PROJECT" \
             --member="serviceAccount:$SERVICE_ACCOUNT_EMAIL" \
             --role="$role" --quiet || log ERROR "Failed to grant role $role."
