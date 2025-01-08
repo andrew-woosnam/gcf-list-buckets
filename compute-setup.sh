@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Script: compute-setup.sh
-# Purpose: Ensure the correct GCP account, project, and ADC are active, then apply Terraform.
+# Purpose: Ensure the correct GCP account, project, and ADC are active, and deploy a Cloud Function directly using gcloud.
 
 set -euo pipefail
 
@@ -33,7 +33,7 @@ load_env() {
     set +a
 
     # Check required variables
-    REQUIRED_VARS=("COMPUTE_PROJECT_ID" "REGION" "COMPUTE_ACCT_USER_EMAIL")
+    REQUIRED_VARS=("COMPUTE_PROJECT_ID" "REGION" "GO_FUNC_FILE" "GO_MOD_FILE" "CLOUD_FUNC_NAME")
     for var in "${REQUIRED_VARS[@]}"; do
         if [[ -z "${!var:-}" ]]; then
             log ERROR "Missing required variable $var in config.env."
@@ -59,48 +59,55 @@ check_auth_and_project() {
 
     if [[ "$active_project" != "$COMPUTE_PROJECT_ID" ]]; then
         log INFO "Active project ($active_project) does not match the expected project ($COMPUTE_PROJECT_ID)."
-        read -p "Do you want to re-authenticate and set the correct project? (y/n): " -r choice
-        if [[ "$choice" =~ ^[Yy]$ ]]; then
-            authenticate_and_set_project
-        else
-            log ERROR "Aborted by user. Ensure the correct project is active before running the script."
-        fi
+        gcloud config set project "$COMPUTE_PROJECT_ID" || log ERROR "Failed to set project: $COMPUTE_PROJECT_ID."
+    fi
+
+    log SUCCESS "Authentication and project match verified."
+}
+
+# Check and Set Application Default Credentials (ADC)
+setup_adc() {
+    log INFO "Checking Application Default Credentials (ADC)..."
+
+    # Verify if ADC is already set and valid
+    if gcloud auth application-default print-access-token &>/dev/null; then
+        log SUCCESS "Application Default Credentials are already set and valid."
     else
-        log SUCCESS "Authentication and project match verified."
+        log INFO "Setting up Application Default Credentials (ADC)..."
+        gcloud auth application-default login || log ERROR "Failed to set up ADC. Run 'gcloud auth application-default login' manually."
+        log SUCCESS "Application Default Credentials set up successfully."
     fi
 }
 
-# Authenticate and Set Project
-authenticate_and_set_project() {
-    log INFO "Authenticating interactively. Follow the prompts to log in."
-    gcloud auth login || log ERROR "Authentication failed."
-    gcloud config set project "$COMPUTE_PROJECT_ID" || log ERROR "Failed to set project: $COMPUTE_PROJECT_ID."
-    log SUCCESS "Authenticated and active project set to $COMPUTE_PROJECT_ID."
-}
+# Deploy Cloud Function
+deploy_cloud_function() {
+    log INFO "Deploying Cloud Function directly using gcloud..."
 
-# Set Application Default Credentials (ADC)
-setup_adc() {
-    log INFO "Setting up Application Default Credentials (ADC)..."
-    gcloud auth application-default login || log ERROR "Failed to set up ADC. Run 'gcloud auth application-default login' manually."
-    log SUCCESS "Application Default Credentials set up successfully."
-}
+    if [[ ! -f "$GO_FUNC_FILE" ]]; then
+        log ERROR "Go function file not found: $GO_FUNC_FILE."
+    fi
 
-# Initialize and Apply Terraform
-apply_terraform() {
-    echo "[INFO] Initializing Terraform..."
-    terraform init $TERRAFORM_INIT_OPTIONS
+    if [[ ! -f "$GO_MOD_FILE" ]]; then
+        log ERROR "Go mod file not found: $GO_MOD_FILE."
+    fi
 
-    echo "[INFO] Applying Terraform configuration..."
-    terraform apply \
-        -var="project_id=$COMPUTE_PROJECT_ID" \
-        -var="region=$REGION" \
-        -var="user_email=$COMPUTE_ACCT_USER_EMAIL" \
-        -var="cloud_function_sa=$CLOUD_FUNCTION_SERVICE_ACCOUNT_NAME" \
-        -var="cloud_func_name=$CLOUD_FUNC_NAME" \
-        -var="go_runtime=$GO_RUNTIME" \
-        -var="entry_point=$ENTRY_POINT" \
-        -var="bucket_name=$BUCKET_NAME" \
-        -auto-approve $TERRAFORM_APPLY_OPTIONS
+    # Prepare deployment directory
+    mkdir -p ./function
+    cp "$GO_FUNC_FILE" ./function/main.go
+    cp "$GO_MOD_FILE" ./function/go.mod
+
+    # Deploy the Cloud Function
+    gcloud functions deploy "$CLOUD_FUNC_NAME" \
+        --region="$REGION" \
+        --runtime="go122" \
+        --entry-point="ListBucketObjects" \
+        --source="./function" \
+        --trigger-http \
+        --allow-unauthenticated \
+        --update-env-vars="COMPUTE_PROJECT_ID=$COMPUTE_PROJECT_ID" || log ERROR "Failed to deploy Cloud Function."
+
+    rm -rf ./function
+    log SUCCESS "Cloud Function deployed successfully."
 }
 
 # Main Script Execution
@@ -108,7 +115,7 @@ main() {
     load_env
     check_auth_and_project
     setup_adc
-    apply_terraform
+    deploy_cloud_function
 }
 
 main "$@"
