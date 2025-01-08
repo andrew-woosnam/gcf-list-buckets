@@ -28,19 +28,55 @@
  *   functions and associated resources in GCP.
  */
 
+# Variables
+variable "project_id" {
+  description = "The GCP project ID"
+  type        = string
+}
+
+variable "region" {
+  description = "The GCP region"
+  type        = string
+}
+
+variable "user_email" {
+  description = "The email of the user managing the compute setup"
+  type        = string
+}
+
+variable "entry_point" {
+  description = "The entry point of the Cloud Function"
+  type        = string
+}
+
+variable "bucket_name" {
+  description = "The name of the GCS bucket for the Cloud Function source"
+  type        = string
+}
+
+variable "cloud_function_sa" {
+  description = "The service account for the Cloud Function"
+  type        = string
+}
+
+variable "cloud_func_name" {
+  description = "The name of the Cloud Function"
+  type        = string
+}
+
+variable "go_runtime" {
+  description = "The runtime for the Cloud Function"
+  type        = string
+}
+
 provider "google" {
   project = var.project_id
   region  = var.region
 }
 
-# Variables
-variable "project_id" {}
-variable "region" {}
-variable "user_email" {}
-
 # Service Accounts
 resource "google_service_account" "cds_cloud_function_service_account" {
-  account_id   = "cds-cloud-function-service-account"
+  account_id   = var.cloud_function_sa
   display_name = "CDS Cloud Function Service Account"
 }
 
@@ -96,7 +132,7 @@ resource "google_service_account_iam_member" "impersonation_role" {
 
 # Cloud Function Deployment
 resource "google_storage_bucket" "source_bucket" {
-  name          = "${var.project_id}-source-bucket"
+  name          = "${var.bucket_name}"
   location      = var.region
   force_destroy = true
 }
@@ -108,10 +144,10 @@ resource "google_storage_bucket_object" "source_archive" {
 }
 
 resource "google_cloudfunctions_function" "example_function" {
-  name        = "example-function"
+  name        = var.cloud_func_name
   description = "An example Cloud Function"
-  runtime     = "nodejs16"
-  entry_point = "functionEntryPoint"
+  runtime     = var.go_runtime
+  entry_point = var.entry_point
 
   source_archive_bucket = google_storage_bucket.source_bucket.name
   source_archive_object = google_storage_bucket_object.source_archive.name

@@ -24,7 +24,7 @@ log() {
 
 # Validate Inputs
 validate_inputs() {
-    [ -n "$TARGET_PROJECT" ] || log ERROR "Target project ID is required as the first argument."
+    [ -n "$TARGET_PROJECT_ID" ] || log ERROR "Target project ID is required as the first argument."
     [ -f "$CLOUD_FUNC_SA_FILE" ] || log ERROR "Cloud Function Service Account file not found: $CLOUD_FUNC_SA_FILE"
     command -v gcloud >/dev/null || log ERROR "gcloud is not installed. Please install it."
     log SUCCESS "Input validation completed."
@@ -36,9 +36,9 @@ authenticate_and_set_project() {
     gcloud auth login || log ERROR "Failed to authenticate interactively."
     log SUCCESS "Authenticated successfully."
 
-    log INFO "Setting active project to: $TARGET_PROJECT"
-    gcloud config set project "$TARGET_PROJECT" || log ERROR "Failed to set project: $TARGET_PROJECT"
-    log SUCCESS "Active project set to $TARGET_PROJECT."
+    log INFO "Setting active project to: $TARGET_PROJECT_ID"
+    gcloud config set project "$TARGET_PROJECT_ID" || log ERROR "Failed to set project: $TARGET_PROJECT_ID"
+    log SUCCESS "Active project set to $TARGET_PROJECT_ID."
 }
 
 # Verify Authentication and Active Project
@@ -53,8 +53,8 @@ verify_auth_and_project() {
         return
     fi
 
-    if [[ "$active_project" != "$TARGET_PROJECT" ]]; then
-        log INFO "Expected project ($TARGET_PROJECT) does not match the active project ($active_project)."
+    if [[ "$active_project" != "$TARGET_PROJECT_ID" ]]; then
+        log INFO "Expected project ($TARGET_PROJECT_ID) does not match the active project ($active_project)."
         authenticate_and_set_project
     else
         log SUCCESS "Continuing with active project: $active_project."
@@ -63,15 +63,15 @@ verify_auth_and_project() {
 
 # Create GCS Bucket
 create_bucket() {
-    log INFO "Checking if bucket $BUCKET_NAME already exists in project $TARGET_PROJECT"
-    if gcloud storage buckets list --project="$TARGET_PROJECT" --format="value(name)" | grep -q "^$BUCKET_NAME$"; then
-        log SUCCESS "Bucket $BUCKET_NAME already exists in project $TARGET_PROJECT."
+    log INFO "Checking if bucket $BUCKET_NAME already exists in project $TARGET_PROJECT_ID"
+    if gcloud storage buckets list --project="$TARGET_PROJECT_ID" --format="value(name)" | grep -q "^$BUCKET_NAME$"; then
+        log SUCCESS "Bucket $BUCKET_NAME already exists in project $TARGET_PROJECT_ID."
     else
-        log INFO "Creating GCS bucket: gs://$BUCKET_NAME in project $TARGET_PROJECT"
+        log INFO "Creating GCS bucket: gs://$BUCKET_NAME in project $TARGET_PROJECT_ID"
         gcloud storage buckets create "gs://$BUCKET_NAME" \
-            --project="$TARGET_PROJECT" \
+            --project="$TARGET_PROJECT_ID" \
             --location="$REGION" || log ERROR "Failed to create GCS bucket."
-        log SUCCESS "GCS bucket gs://$BUCKET_NAME created in project $TARGET_PROJECT."
+        log SUCCESS "GCS bucket gs://$BUCKET_NAME created in project $TARGET_PROJECT_ID."
     fi
 
     # Enable Uniform Bucket-Level Access (UBLA) if requested
@@ -93,13 +93,13 @@ configure_bucket_iam() {
     gcloud storage buckets add-iam-policy-binding "$bucket_url" \
         --member="serviceAccount:$cloud_func_sa" \
         --role="roles/storage.objectViewer" \
-        --project="$TARGET_PROJECT" || log ERROR "Failed to grant object viewer IAM permissions."
+        --project="$TARGET_PROJECT_ID" || log ERROR "Failed to grant object viewer IAM permissions."
 
     # Grant bucket-level access if needed
     gcloud storage buckets add-iam-policy-binding "$bucket_url" \
         --member="serviceAccount:$cloud_func_sa" \
         --role="roles/storage.legacyBucketReader" \
-        --project="$TARGET_PROJECT" || log ERROR "Failed to grant legacy bucket reader IAM permissions."
+        --project="$TARGET_PROJECT_ID" || log ERROR "Failed to grant legacy bucket reader IAM permissions."
 
     log SUCCESS "IAM permissions granted for $cloud_func_sa on bucket $bucket_url."
 }
