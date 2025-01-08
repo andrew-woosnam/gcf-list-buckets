@@ -1,3 +1,21 @@
 vendor/
-keys/
-scripts/cloud-func-service-account.txt
+
+# Ignore Terraform working directory
+.terraform/
+
+# Ignore Terraform state files
+*.tfstate
+*.tfstate.backup
+
+# Ignore crash logs
+crash.log
+
+# Ignore Terraform plan output files
+terraform.tfplan
+
+# Ignore variable definition files with sensitive data
+*.tfvars
+
+# Ignore lock files if managed outside of VCS
+.terraform.lock.hcl
+.terraform.tfstate.lock.info
