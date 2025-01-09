@@ -86,6 +86,8 @@ Here are the equivalents we can use in GCP:
   - `roles/storage.objectViewer`: Read access to GCS.
   - `roles/pubsub.publisher`: Publish messages to Pub/Sub.
   - `roles/cloudkms.cryptoKeyDecrypter`: Decrypt data using KMS.
+  - `roles/serviceusage.serviceUsageConsumer`: Required for the service account to make API calls on behalf of the project.
+    - _note: this was necessary for the proof of concept I created; it's possible that different implementations might not require it_
 
 #### **CDS Mothership Service Account**
 - Used by the external server to access Pub/Sub and KMS.

@@ -41,3 +41,9 @@ resource "google_project_iam_member" "cds_pubsub_access" {
   role    = "roles/pubsub.publisher"
   member  = "serviceAccount:${google_service_account.cds_cloud_function_service_account.email}"
 }
+
+resource "google_project_iam_member" "cds_service_usage_access" {
+  project = var.project_id
+  role    = "roles/serviceusage.serviceUsageConsumer"
+  member  = "serviceAccount:${google_service_account.cds_cloud_function_service_account.email}"
+}
