@@ -23,16 +23,6 @@ variable "cloud_function_sa" {
   type        = string
 }
 
-variable "cloud_func_name" {
-  description = "The name of the Cloud Function"
-  type        = string
-}
-
-variable "docker_image" {
-  description = "The Docker image URI for the Cloud Function"
-  type        = string
-}
-
 # Service Account
 resource "google_service_account" "cds_cloud_function_service_account" {
   account_id   = var.cloud_function_sa
@@ -50,19 +40,4 @@ resource "google_project_iam_member" "cds_pubsub_access" {
   project = var.project_id
   role    = "roles/pubsub.publisher"
   member  = "serviceAccount:${google_service_account.cds_cloud_function_service_account.email}"
-}
-
-# Deploy the Docker-based Cloud Function
-resource "google_cloudfunctions_function" "example_function" {
-  name        = var.cloud_func_name
-  runtime     = "go119" # Runtime is irrelevant for Docker-based deployments
-  available_memory_mb = 256
-  timeout = 60
-
-  deployment_container {
-    image_uri = var.docker_image
-  }
-
-  trigger_http = true
-  service_account_email = google_service_account.cds_cloud_function_service_account.email
 }
