@@ -1,8 +1,5 @@
 #!/bin/bash
 
-# Script: compute-setup.sh
-# Purpose: Ensure the correct GCP account, project, and ADC are active, and deploy a Cloud Function directly using gcloud.
-
 set -euo pipefail
 
 # Logging Helper
@@ -26,14 +23,12 @@ load_env() {
         log ERROR "Missing config.env file. Please create one with required variables."
     fi
 
-    # Source the environment variables from config.env
     log INFO "Loading configuration from config.env..."
     set -a
     source config.env
     set +a
 
-    # Check required variables
-    REQUIRED_VARS=("COMPUTE_PROJECT_ID" "REGION" "GO_FUNC_FILE" "GO_MOD_FILE" "CLOUD_FUNC_NAME")
+    REQUIRED_VARS=("COMPUTE_PROJECT_ID" "REGION" "GO_FUNC_FILE" "GO_MOD_FILE" "CLOUD_FUNC_NAME" "CLOUD_FUNCTION_SERVICE_ACCOUNT_NAME")
     for var in "${REQUIRED_VARS[@]}"; do
         if [[ -z "${!var:-}" ]]; then
             log ERROR "Missing required variable $var in config.env."
@@ -96,6 +91,18 @@ setup_adc() {
     fi
 }
 
+# Run Terraform to Configure GCP Resources
+run_terraform() {
+    log INFO "Running Terraform to configure GCP resources..."
+    terraform init -input=false || log ERROR "Terraform initialization failed."
+    terraform apply -auto-approve \
+        -var="project_id=$COMPUTE_PROJECT_ID" \
+        -var="region=$REGION" \
+        -var="cloud_function_sa=$CLOUD_FUNCTION_SERVICE_ACCOUNT_NAME" \
+        || log ERROR "Terraform apply failed."
+    log SUCCESS "Terraform applied successfully."
+}
+
 # Deploy Cloud Function
 deploy_cloud_function() {
     log INFO "Deploying Cloud Function directly using gcloud..."
@@ -108,27 +115,26 @@ deploy_cloud_function() {
         log ERROR "Go mod file not found: $GO_MOD_FILE."
     fi
 
-    # Prepare deployment directory
     mkdir -p ./function
     cp "$GO_FUNC_FILE" ./function/main.go
     cp "$GO_MOD_FILE" ./function/go.mod
 
-    # Deploy the Cloud Function
+    SERVICE_ACCOUNT_EMAIL="$CLOUD_FUNCTION_SERVICE_ACCOUNT_NAME@$COMPUTE_PROJECT_ID.iam.gserviceaccount.com"
+
     gcloud functions deploy "$CLOUD_FUNC_NAME" \
-        --project="$COMPUTE_PROJECT_ID" \
         --region="$REGION" \
-        --runtime="go122" \
-        --entry-point="ListBucketObjects" \
+        --runtime="$GO_RUNTIME" \
+        --entry-point="$ENTRY_POINT" \
         --source="./function" \
         --trigger-http \
+        --gen2 \
+        --service-account="$SERVICE_ACCOUNT_EMAIL" \
         --allow-unauthenticated \
-        --update-env-vars="COMPUTE_PROJECT_ID=$COMPUTE_PROJECT_ID" || log ERROR "Failed to deploy Cloud Function."
+        --update-env-vars="BUCKET_NAME=$BUCKET_NAME,CLOUD_FUNC_SA=$SERVICE_ACCOUNT_EMAIL,BILLING_PROJECT=$COMPUTE_PROJECT_ID,GOOGLE_API_GO_CLIENT_LOG=debug" || log ERROR "Failed to deploy/update Cloud Function."
 
     rm -rf ./function
 
-    SERVICE_ACCOUNT_EMAIL="$CLOUD_FUNCTION_SERVICE_ACCOUNT_NAME@$COMPUTE_PROJECT_ID.iam.gserviceaccount.com"
-    echo "$SERVICE_ACCOUNT_EMAIL" >cloud-func-service-account.txt
-    log SUCCESS "Cloud Function deployed/updated and service account saved to cloud-func-service-account.txt."
+    log SUCCESS "Cloud Function deployed successfully."
 }
 
 # Main Script Execution
@@ -136,6 +142,7 @@ main() {
     load_env
     check_auth_and_project
     setup_adc
+    run_terraform
     deploy_cloud_function
 }
 
