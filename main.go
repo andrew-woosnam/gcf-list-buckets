@@ -15,6 +15,13 @@ import (
 	storagev1 "google.golang.org/api/storage/v1"
 )
 
+// Debug logger function
+func debugLog(format string, args ...interface{}) {
+	if os.Getenv("DEBUG") == "true" {
+		fmt.Printf(format, args...)
+	}
+}
+
 type GCloudFunctionConfig struct {
 	StorageBucketName           string
 	CloudFunctionServiceAccount string
@@ -40,8 +47,7 @@ func createStorageClientWithOAuth(ctx context.Context) (*storage.Client, error) 
 }
 
 func checkBucketAccess(ctx context.Context, client *storage.Client, bucketName, userProject string, w http.ResponseWriter) error {
-	fmt.Fprintf(w, "Bucket Name: %s\nUser Project: %s\n", bucketName, userProject)
-
+	debugLog("Debug: Checking bucket access for bucket %s with user project %s\n", bucketName, userProject)
 	bucket := client.Bucket(bucketName).UserProject(userProject)
 	attrs, err := bucket.Attrs(ctx)
 	if err != nil {
@@ -49,6 +55,7 @@ func checkBucketAccess(ctx context.Context, client *storage.Client, bucketName, 
 		return err
 	}
 	fmt.Fprintf(w, "Bucket Name: %s\nBucket Location: %s\nRequester Pays: %t\n", attrs.Name, attrs.Location, attrs.RequesterPays)
+	debugLog("Debug: Bucket access verified for bucket %s\n", bucketName)
 	return nil
 }
 
@@ -57,66 +64,57 @@ func ListBucketObjects(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	cfg := NewGCloudFunctionConfig()
 
-	// Debug: Print configuration
-	fmt.Fprintf(w, "Debug: Configuration loaded.\n")
-	fmt.Fprintf(w, "Bucket Name: '%s'\nBilling Project ID: %s\n", cfg.StorageBucketName, cfg.BillingProjectID)
+	debugLog("Debug: Configuration loaded: Bucket=%s, BillingProjectID=%s\n", cfg.StorageBucketName, cfg.BillingProjectID)
 
-	// Create storage client
-	fmt.Fprintf(w, "Debug: Creating storage client...\n")
 	client, err := createStorageClientWithOAuth(ctx)
 	if err != nil {
 		fmt.Fprintf(w, "Error creating storage client: %v\n", err)
 		return
 	}
 	defer client.Close()
-	fmt.Fprintf(w, "Debug: Storage client created successfully.\n")
+	debugLog("Debug: Storage client created successfully.\n")
 
-	// Check bucket access
-	fmt.Fprintf(w, "Debug: Checking bucket access...\n")
 	if err := checkBucketAccess(ctx, client, cfg.StorageBucketName, cfg.BillingProjectID, w); err != nil {
 		fmt.Fprintf(w, "Error checking bucket access: %v\n", err)
 		return
 	}
-	fmt.Fprintf(w, "Debug: Bucket access verified successfully.\n")
 
-	// Initialize object iterator
-	fmt.Fprintf(w, "Debug: Initializing object iterator for bucket: %s\n", cfg.StorageBucketName)
 	it := client.Bucket(cfg.StorageBucketName).UserProject(cfg.BillingProjectID).Objects(ctx, nil)
 
-	// Iterate through objects
-	fmt.Fprintf(w, "Debug: Listing objects in bucket...\n")
+	debugLog("Debug: Listing objects in bucket %s...\n", cfg.StorageBucketName)
 	var firstObjectName string
 	for {
 		objAttrs, err := it.Next()
 		if err == iterator.Done {
-			fmt.Fprintf(w, "Debug: Reached end of object list.\n")
+			debugLog("Debug: Reached end of object list.\n")
 			break
 		}
 		if err != nil {
 			fmt.Fprintf(w, "Error listing objects: %v\n", err)
 			return
 		}
-		fmt.Fprintf(w, "Debug: Found object: %s\n", objAttrs.Name)
+		fmt.Fprintf(w, "Object: %s\n", objAttrs.Name)
 		if firstObjectName == "" {
 			firstObjectName = objAttrs.Name
 		}
 	}
 
 	if firstObjectName == "" {
-		fmt.Fprintf(w, "Debug: No objects found in the bucket.\n")
 		fmt.Fprintln(w, "No objects found in the bucket.")
+		debugLog("Debug: No objects found in the bucket.\n")
 		return
 	}
 
-	fmt.Fprintf(w, "Debug: Preparing to download first object: %s\n", firstObjectName)
+	debugLog("Debug: Preparing to download first object: %s\n", firstObjectName)
 	if err := downloadObject(ctx, client, cfg.StorageBucketName, firstObjectName, w); err != nil {
 		fmt.Fprintf(w, "Error downloading object: %v\n", err)
 		return
 	}
-	fmt.Fprintf(w, "Debug: Successfully downloaded object: %s\n", firstObjectName)
+	debugLog("Debug: Successfully downloaded object: %s\n", firstObjectName)
 }
 
 func downloadObject(ctx context.Context, client *storage.Client, bucketName, objectName string, w http.ResponseWriter) error {
+	debugLog("Debug: Starting download for object %s in bucket %s\n", objectName, bucketName)
 	rc, err := client.Bucket(bucketName).Object(objectName).NewReader(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to create reader for object %s: %v", objectName, err)
@@ -134,19 +132,20 @@ func downloadObject(ctx context.Context, client *storage.Client, bucketName, obj
 	}
 
 	fmt.Fprintf(w, "Downloaded object %s to local file %s\n", objectName, objectName)
+	debugLog("Debug: Successfully downloaded object %s\n", objectName)
 	return nil
 }
 
 func handleError(w http.ResponseWriter, err error) {
 	if gErr, ok := err.(*googleapi.Error); ok {
 		fmt.Fprintf(w, "Error Code: %d\nMessage: %s\nDetails:\n", gErr.Code, gErr.Message)
-		fmt.Printf("Full Error: %+v\n", gErr) // Log full error for debugging
+		debugLog("Debug: Full Error: %+v\n", gErr)
 
 		for _, detail := range gErr.Errors {
 			fmt.Fprintf(w, "Reason: %s, Message: %s\n", detail.Reason, detail.Message)
 		}
 	} else {
 		fmt.Fprintf(w, "Unknown error: %v\n", err)
-		fmt.Printf("Unknown error: %+v\n", err) // Log unknown errors
+		debugLog("Debug: Unknown error: %+v\n", err)
 	}
 }

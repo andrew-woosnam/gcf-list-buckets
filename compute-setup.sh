@@ -130,7 +130,12 @@ deploy_cloud_function() {
         --gen2 \
         --service-account="$SERVICE_ACCOUNT_EMAIL" \
         --allow-unauthenticated \
-        --update-env-vars="BUCKET_NAME=$BUCKET_NAME,CLOUD_FUNC_SA=$SERVICE_ACCOUNT_EMAIL,BILLING_PROJECT=$COMPUTE_PROJECT_ID,GOOGLE_API_GO_CLIENT_LOG=debug" || log ERROR "Failed to deploy/update Cloud Function."
+        --update-env-vars="\
+        BUCKET_NAME=$BUCKET_NAME,\
+        CLOUD_FUNC_SA=$SERVICE_ACCOUNT_EMAIL,\
+        BILLING_PROJECT=$COMPUTE_PROJECT_ID,\
+        DEBUG=false,\
+        GOOGLE_API_GO_CLIENT_LOG=debug" || log ERROR "Failed to deploy/update Cloud Function."
 
     rm -rf ./function
 
