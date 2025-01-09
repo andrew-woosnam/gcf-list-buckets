@@ -1,13 +1,18 @@
 module github.com/andrew-woosnam/gcf-list-buckets
 
-go 1.22
+go 1.22.0
+
+toolchain go1.23.2
 
 require (
 	cloud.google.com/go/storage v1.43.0 // Google Cloud Storage client library
 	google.golang.org/api v0.214.0 // Google APIs library for IAM and other services
 )
 
-require golang.org/x/oauth2 v0.25.0
+require (
+	cloud.google.com/go/pubsub v1.39.0
+	golang.org/x/oauth2 v0.25.0
+)
 
 require (
 	cloud.google.com/go v0.115.0 // indirect

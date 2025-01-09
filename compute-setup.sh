@@ -28,7 +28,17 @@ load_env() {
     source config.env
     set +a
 
-    REQUIRED_VARS=("COMPUTE_PROJECT_ID" "REGION" "GO_FUNC_FILE" "GO_MOD_FILE" "CLOUD_FUNC_NAME" "CLOUD_FUNCTION_SERVICE_ACCOUNT_NAME")
+    REQUIRED_VARS=(
+        "COMPUTE_PROJECT_ID"
+        "REGION"
+        "GO_FUNC_FILE"
+        "GO_MOD_FILE"
+        "CLOUD_FUNC_NAME"
+        "CLOUD_FUNCTION_SERVICE_ACCOUNT_NAME"
+        "PUBSUB_TOPIC_ID"
+        "PUBSUB_SUBSCRIPTION_ID"
+    )
+
     for var in "${REQUIRED_VARS[@]}"; do
         if [[ -z "${!var:-}" ]]; then
             log ERROR "Missing required variable $var in config.env."
@@ -99,6 +109,8 @@ run_terraform() {
         -var="project_id=$COMPUTE_PROJECT_ID" \
         -var="region=$REGION" \
         -var="cloud_function_sa=$CLOUD_FUNCTION_SERVICE_ACCOUNT_NAME" \
+        -var="pubsub_topic_id=$PUBSUB_TOPIC_ID" \
+        -var="pubsub_subscription_id=$PUBSUB_SUBSCRIPTION_ID" \
         || log ERROR "Terraform apply failed."
     log SUCCESS "Terraform applied successfully."
 }
@@ -157,7 +169,7 @@ deploy_cloud_function() {
         --gen2 \
         --service-account="$SERVICE_ACCOUNT_EMAIL" \
         --allow-unauthenticated \
-        --update-env-vars="BUCKET_NAME=$BUCKET_NAME,COMPUTE_PROJECT_ID=$COMPUTE_PROJECT_ID,DEBUG=true,GOOGLE_API_GO_CLIENT_LOG=debug" || log ERROR "Failed to deploy/update Cloud Function."
+        --update-env-vars="BUCKET_NAME=$BUCKET_NAME,COMPUTE_PROJECT_ID=$COMPUTE_PROJECT_ID,PUBSUB_TOPIC_ID=test-topic,PUBSUB_SUBSCRIPTION_ID=test-subscription,DEBUG=true,GOOGLE_API_GO_CLIENT_LOG=debug" || log ERROR "Failed to deploy/update Cloud Function."
 
     rm -rf ./function
 

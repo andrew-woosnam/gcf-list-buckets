@@ -23,6 +23,18 @@ variable "cloud_function_sa" {
   type        = string
 }
 
+variable "pubsub_topic_id" {
+  description = "Pub/Sub topic ID for testing"
+  type        = string
+  default     = "test-topic"
+}
+
+variable "pubsub_subscription_id" {
+  description = "Pub/Sub subscription ID for testing"
+  type        = string
+  default     = "test-subscription"
+}
+
 # Service Account
 resource "google_service_account" "cds_cloud_function_service_account" {
   account_id   = var.cloud_function_sa
@@ -51,5 +63,30 @@ resource "google_project_iam_member" "cds_service_usage_access" {
 resource "google_project_iam_member" "cds_storage_viewer_access" {
   project = var.project_id
   role    = "roles/storage.objectViewer"
+  member  = "serviceAccount:${google_service_account.cds_cloud_function_service_account.email}"
+}
+
+# Pub/Sub Topic
+resource "google_pubsub_topic" "test_topic" {
+  name = var.pubsub_topic_id
+}
+
+# Pub/Sub Subscription
+resource "google_pubsub_subscription" "test_subscription" {
+  name  = var.pubsub_subscription_id
+  topic = google_pubsub_topic.test_topic.id
+}
+
+# Grant Service Account Publish Permission
+resource "google_project_iam_member" "cds_pubsub_publisher" {
+  project = var.project_id
+  role    = "roles/pubsub.publisher"
+  member  = "serviceAccount:${google_service_account.cds_cloud_function_service_account.email}"
+}
+
+# Grant Service Account Subscriber Permission
+resource "google_project_iam_member" "cds_pubsub_subscriber" {
+  project = var.project_id
+  role    = "roles/pubsub.subscriber"
   member  = "serviceAccount:${google_service_account.cds_cloud_function_service_account.email}"
 }
