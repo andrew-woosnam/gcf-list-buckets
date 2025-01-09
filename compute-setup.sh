@@ -50,12 +50,29 @@ check_auth_and_project() {
     active_account=$(gcloud auth list --filter="status:ACTIVE" --format="value(account)" 2>/dev/null || echo "")
     active_project=$(gcloud config get-value project 2>/dev/null || echo "")
 
-    if [[ -z "$active_account" || -z "$active_project" ]]; then
-        log ERROR "No active account or project detected. Please authenticate and set a project."
+    if [[ -z "$active_account" ]]; then
+        log ERROR "No active account detected. Please authenticate."
     fi
 
-    log INFO "Current active account: $active_account"
-    log INFO "Current active project: $active_project"
+    if [[ "$active_account" != "$COMPUTE_ACCT_USER_EMAIL" ]]; then
+        log INFO "Active account ($active_account) does not match the expected account ($COMPUTE_ACCT_USER_EMAIL)."
+        log INFO "Switching to the correct account..."
+
+        gcloud auth login "$COMPUTE_ACCT_USER_EMAIL" --brief || log ERROR "Failed to switch to the correct account: $COMPUTE_ACCT_USER_EMAIL."
+        active_account=$(gcloud auth list --filter="status:ACTIVE" --format="value(account)" 2>/dev/null || echo "")
+
+        if [[ "$active_account" != "$COMPUTE_ACCT_USER_EMAIL" ]]; then
+            log ERROR "Failed to set the expected account: $COMPUTE_ACCT_USER_EMAIL."
+        fi
+
+        log SUCCESS "Switched to the correct account: $active_account."
+    else
+        log SUCCESS "Active account matches the expected account: $active_account."
+    fi
+
+    if [[ -z "$active_project" ]]; then
+        log ERROR "No active project detected. Please set a project."
+    fi
 
     if [[ "$active_project" != "$COMPUTE_PROJECT_ID" ]]; then
         log INFO "Active project ($active_project) does not match the expected project ($COMPUTE_PROJECT_ID)."
@@ -98,6 +115,7 @@ deploy_cloud_function() {
 
     # Deploy the Cloud Function
     gcloud functions deploy "$CLOUD_FUNC_NAME" \
+        --project="$COMPUTE_PROJECT_ID" \
         --region="$REGION" \
         --runtime="go122" \
         --entry-point="ListBucketObjects" \
@@ -107,7 +125,10 @@ deploy_cloud_function() {
         --update-env-vars="COMPUTE_PROJECT_ID=$COMPUTE_PROJECT_ID" || log ERROR "Failed to deploy Cloud Function."
 
     rm -rf ./function
-    log SUCCESS "Cloud Function deployed successfully."
+
+    SERVICE_ACCOUNT_EMAIL="$CLOUD_FUNCTION_SERVICE_ACCOUNT_NAME@$COMPUTE_PROJECT_ID.iam.gserviceaccount.com"
+    echo "$SERVICE_ACCOUNT_EMAIL" >cloud-func-service-account.txt
+    log SUCCESS "Cloud Function deployed/updated and service account saved to cloud-func-service-account.txt."
 }
 
 # Main Script Execution

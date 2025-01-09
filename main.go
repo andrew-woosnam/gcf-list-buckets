@@ -24,9 +24,9 @@ type GCloudFunctionConfig struct {
 
 func NewGCloudFunctionConfig() *GCloudFunctionConfig {
 	return &GCloudFunctionConfig{
-		StorageBucketName:           os.Getenv("STORAGE_BUCKET"),
-		CloudFunctionServiceAccount: os.Getenv("CLOUD_FUNC_SA"),
-		BillingProjectID:            os.Getenv("BILLING_PROJECT"),
+		StorageBucketName:           os.Getenv("BUCKET_NAME"),
+		CloudFunctionServiceAccount: os.Getenv("CLOUD_FUNCTION_SERVICE_ACCOUNT_NAME"),
+		BillingProjectID:            os.Getenv("COMPUTE_PROJECT_ID"),
 		StorageClientAudience:       "https://storage.googleapis.com",
 	}
 }
@@ -37,17 +37,6 @@ func createStorageClientWithOAuth(ctx context.Context) (*storage.Client, error) 
 		return nil, fmt.Errorf("failed to create token source: %v", err)
 	}
 	return storage.NewClient(ctx, option.WithTokenSource(tokenSource))
-}
-
-func checkBucketAccess(ctx context.Context, client *storage.Client, bucketName, userProject string, w http.ResponseWriter) error {
-	bucket := client.Bucket(bucketName).UserProject(userProject)
-	attrs, err := bucket.Attrs(ctx)
-	if err != nil {
-		handleError(w, err)
-		return err
-	}
-	fmt.Fprintf(w, "Bucket Name: %s\nBucket Location: %s\nRequester Pays: %t\n", attrs.Name, attrs.Location, attrs.RequesterPays)
-	return nil
 }
 
 func ListBucketObjects(w http.ResponseWriter, r *http.Request) {
@@ -61,10 +50,6 @@ func ListBucketObjects(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer client.Close()
-
-	if err := checkBucketAccess(ctx, client, cfg.StorageBucketName, cfg.BillingProjectID, w); err != nil {
-		return
-	}
 
 	it := client.Bucket(cfg.StorageBucketName).UserProject(cfg.BillingProjectID).Objects(ctx, nil)
 	var firstObjectName string
