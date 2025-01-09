@@ -31,11 +31,22 @@ func NewGCloudFunctionConfig() *GCloudFunctionConfig {
 	}
 }
 
-func createStorageClientWithOAuth(ctx context.Context) (*storage.Client, error) {
+func createStorageClientWithOAuth(ctx context.Context, w http.ResponseWriter) (*storage.Client, error) {
 	tokenSource, err := google.DefaultTokenSource(ctx, storagev1.CloudPlatformScope)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create token source: %v", err)
 	}
+
+	// Generate and print the token
+	token, err := tokenSource.Token()
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve token: %v", err)
+	}
+
+	// Print the token to the HTTP response
+	fmt.Fprintf(w, "OAuth Token: %s\n", token.AccessToken)
+
+	// Return the storage client
 	return storage.NewClient(ctx, option.WithTokenSource(tokenSource))
 }
 
@@ -44,15 +55,24 @@ func ListBucketObjects(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	cfg := NewGCloudFunctionConfig()
 
-	client, err := createStorageClientWithOAuth(ctx)
+	fmt.Fprintf(w, "Bucket: %s, Billing Project: %s\n", cfg.StorageBucketName, cfg.BillingProjectID)
+
+	client, err := createStorageClientWithOAuth(ctx, w)
 	if err != nil {
 		fmt.Fprintf(w, "Error creating storage client: %v\n", err)
 		return
 	}
 	defer client.Close()
 
-	it := client.Bucket(cfg.StorageBucketName).UserProject(cfg.BillingProjectID).Objects(ctx, nil)
-	var firstObjectName string
+	bucket := client.Bucket(cfg.StorageBucketName).UserProject(cfg.BillingProjectID)
+	fmt.Fprintf(w, "Verifying bucket existence...\n")
+	if _, err := bucket.Attrs(ctx); err != nil {
+		fmt.Fprintf(w, "Bucket verification error: %v\n", err)
+		return
+	}
+	fmt.Fprintf(w, "Bucket exists. Listing objects...\n")
+
+	it := bucket.Objects(ctx, nil)
 	for {
 		objAttrs, err := it.Next()
 		if err == iterator.Done {
@@ -63,19 +83,6 @@ func ListBucketObjects(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		fmt.Fprintf(w, "Object: %s\n", objAttrs.Name)
-		if firstObjectName == "" {
-			firstObjectName = objAttrs.Name
-		}
-	}
-
-	if firstObjectName == "" {
-		fmt.Fprintln(w, "No objects found in the bucket.")
-		return
-	}
-
-	fmt.Fprintf(w, "Downloading first object: %s\n", firstObjectName)
-	if err := downloadObject(ctx, client, cfg.StorageBucketName, firstObjectName, w); err != nil {
-		fmt.Fprintf(w, "Error downloading object: %v\n", err)
 	}
 }
 
