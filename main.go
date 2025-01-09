@@ -31,23 +31,23 @@ func NewGCloudFunctionConfig() *GCloudFunctionConfig {
 	}
 }
 
-func createStorageClientWithOAuth(ctx context.Context, w http.ResponseWriter) (*storage.Client, error) {
+func createStorageClientWithOAuth(ctx context.Context) (*storage.Client, error) {
 	tokenSource, err := google.DefaultTokenSource(ctx, storagev1.CloudPlatformScope)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create token source: %v", err)
 	}
-
-	// Generate and print the token
-	token, err := tokenSource.Token()
-	if err != nil {
-		return nil, fmt.Errorf("failed to retrieve token: %v", err)
-	}
-
-	// Print the token to the HTTP response
-	fmt.Fprintf(w, "OAuth Token: %s\n", token.AccessToken)
-
-	// Return the storage client
 	return storage.NewClient(ctx, option.WithTokenSource(tokenSource))
+}
+
+func checkBucketAccess(ctx context.Context, client *storage.Client, bucketName, userProject string, w http.ResponseWriter) error {
+	bucket := client.Bucket(bucketName).UserProject(userProject)
+	attrs, err := bucket.Attrs(ctx)
+	if err != nil {
+		handleError(w, err)
+		return err
+	}
+	fmt.Fprintf(w, "Bucket Name: %s\nBucket Location: %s\nRequester Pays: %t\n", attrs.Name, attrs.Location, attrs.RequesterPays)
+	return nil
 }
 
 func ListBucketObjects(w http.ResponseWriter, r *http.Request) {
@@ -55,24 +55,19 @@ func ListBucketObjects(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	cfg := NewGCloudFunctionConfig()
 
-	fmt.Fprintf(w, "Bucket: %s, Billing Project: %s\n", cfg.StorageBucketName, cfg.BillingProjectID)
-
-	client, err := createStorageClientWithOAuth(ctx, w)
+	client, err := createStorageClientWithOAuth(ctx)
 	if err != nil {
 		fmt.Fprintf(w, "Error creating storage client: %v\n", err)
 		return
 	}
 	defer client.Close()
 
-	bucket := client.Bucket(cfg.StorageBucketName).UserProject(cfg.BillingProjectID)
-	fmt.Fprintf(w, "Verifying bucket existence...\n")
-	if _, err := bucket.Attrs(ctx); err != nil {
-		fmt.Fprintf(w, "Bucket verification error: %v\n", err)
+	if err := checkBucketAccess(ctx, client, cfg.StorageBucketName, cfg.BillingProjectID, w); err != nil {
 		return
 	}
-	fmt.Fprintf(w, "Bucket exists. Listing objects...\n")
 
-	it := bucket.Objects(ctx, nil)
+	it := client.Bucket(cfg.StorageBucketName).UserProject(cfg.BillingProjectID).Objects(ctx, nil)
+	var firstObjectName string
 	for {
 		objAttrs, err := it.Next()
 		if err == iterator.Done {
@@ -83,6 +78,19 @@ func ListBucketObjects(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		fmt.Fprintf(w, "Object: %s\n", objAttrs.Name)
+		if firstObjectName == "" {
+			firstObjectName = objAttrs.Name
+		}
+	}
+
+	if firstObjectName == "" {
+		fmt.Fprintln(w, "No objects found in the bucket.")
+		return
+	}
+
+	fmt.Fprintf(w, "Downloading first object: %s\n", firstObjectName)
+	if err := downloadObject(ctx, client, cfg.StorageBucketName, firstObjectName, w); err != nil {
+		fmt.Fprintf(w, "Error downloading object: %v\n", err)
 	}
 }
 
@@ -109,11 +117,14 @@ func downloadObject(ctx context.Context, client *storage.Client, bucketName, obj
 
 func handleError(w http.ResponseWriter, err error) {
 	if gErr, ok := err.(*googleapi.Error); ok {
-		fmt.Fprintf(w, "Error Code: %d\nMessage: %s\n", gErr.Code, gErr.Message)
+		fmt.Fprintf(w, "Error Code: %d\nMessage: %s\nDetails:\n", gErr.Code, gErr.Message)
+		fmt.Printf("Full Error: %+v\n", gErr) // Log full error for debugging
+
 		for _, detail := range gErr.Errors {
 			fmt.Fprintf(w, "Reason: %s, Message: %s\n", detail.Reason, detail.Message)
 		}
 	} else {
 		fmt.Fprintf(w, "Unknown error: %v\n", err)
+		fmt.Printf("Unknown error: %+v\n", err) // Log unknown errors
 	}
 }
