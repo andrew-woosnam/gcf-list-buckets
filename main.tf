@@ -90,3 +90,31 @@ resource "google_project_iam_member" "cds_pubsub_subscriber" {
   role    = "roles/pubsub.subscriber"
   member  = "serviceAccount:${google_service_account.cds_cloud_function_service_account.email}"
 }
+
+# KMS KeyRing
+resource "google_kms_key_ring" "test_key_ring" {
+  name     = "test-key-ring"
+  location = var.region
+}
+
+# KMS CryptoKey
+resource "google_kms_crypto_key" "test_crypto_key" {
+  name            = "test-crypto-key"
+  key_ring        = google_kms_key_ring.test_key_ring.id
+  purpose         = "ENCRYPT_DECRYPT"
+  rotation_period = "2592000s" # 30 days
+}
+
+# Grant Service Account Decrypt Permission
+resource "google_kms_crypto_key_iam_member" "cloud_func_decrypt" {
+  crypto_key_id = google_kms_crypto_key.test_crypto_key.id
+  role          = "roles/cloudkms.cryptoKeyDecrypter"
+  member        = "serviceAccount:${google_service_account.cds_cloud_function_service_account.email}"
+}
+
+# Grant Encrypt Permission (simulate Mothership for testing)
+resource "google_kms_crypto_key_iam_member" "cloud_func_encrypt" {
+  crypto_key_id = google_kms_crypto_key.test_crypto_key.id
+  role          = "roles/cloudkms.cryptoKeyEncrypter"
+  member        = "serviceAccount:${google_service_account.cds_cloud_function_service_account.email}"
+}

@@ -2,6 +2,7 @@ package gcf
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -9,6 +10,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	kms "cloud.google.com/go/kms/apiv1"
 
 	"cloud.google.com/go/pubsub"
 	"cloud.google.com/go/storage"
@@ -99,6 +102,54 @@ func DoIt(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Println("Pub/Sub test completed successfully.")
+
+	// Simulate a ciphertext (this would normally come from a real source)
+	ciphertext := simulateEncryptedData()
+
+	// Decrypt using KMS
+	plaintext, err := decryptWithKMS(cfg.KmsKey, ciphertext)
+	if err != nil {
+		log.Printf("Failed to decrypt data: %v\n", err)
+		http.Error(w, "Failed to decrypt data", http.StatusInternalServerError)
+		return
+	}
+
+	fmt.Fprintf(w, "Decrypted data: %s\n", plaintext)
+}
+
+func simulateEncryptedData() string {
+	// Simulated base64-encoded ciphertext (for testing purposes only)
+	return "CiQAA...fakeEncryptedData=="
+}
+
+func decryptWithKMS(cryptoKey string, ciphertextBase64 string) (string, error) {
+	ctx := context.Background()
+	client, err := kms.NewKeyManagementClient(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to create KMS client: %w", err)
+	}
+	defer client.Close()
+
+	// Decode the base64-encoded ciphertext
+	ciphertext, err := base64.StdEncoding.DecodeString(ciphertextBase64)
+	if err != nil {
+		return "", fmt.Errorf("failed to decode ciphertext: %w", err)
+	}
+
+	// Prepare the DecryptRequest
+	req := &kms.DecryptRequest{
+		Name:       cryptoKey,
+		Ciphertext: ciphertext,
+	}
+
+	// Call the KMS API to decrypt the data
+	resp, err := client.Decrypt(ctx, req)
+	if err != nil {
+		return "", fmt.Errorf("failed to decrypt data: %w", err)
+	}
+
+	// Return the plaintext as a string
+	return string(resp.Plaintext), nil
 }
 
 // Debug logger function
@@ -114,6 +165,7 @@ type GCloudFunctionConfig struct {
 	StorageClientAudience string
 	PubSubTopicId         string
 	PubSubSubscriptionId  string
+	KmsKey                string
 }
 
 func NewGCloudFunctionConfig() *GCloudFunctionConfig {
@@ -122,6 +174,7 @@ func NewGCloudFunctionConfig() *GCloudFunctionConfig {
 		ComputeProjectId:      os.Getenv("COMPUTE_PROJECT_ID"),
 		PubSubTopicId:         os.Getenv("PUBSUB_TOPIC_ID"),
 		PubSubSubscriptionId:  os.Getenv("PUBSUB_SUBSCRIPTION_ID"),
+		KmsKey:                os.Getenv("KMS_KEY"),
 		StorageClientAudience: "https://storage.googleapis.com",
 	}
 }
